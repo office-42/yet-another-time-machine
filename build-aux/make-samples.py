@@ -213,3 +213,229 @@ s.fmt("B13 C13 D13 E13 B14 C14 D14 E14", "0.000")
 s.fmt("B21 B22 B28 B29 B30", "0.0%")
 s.save("judgment.tm")
 print("ok")
+
+# ---- 6. Weather ----------------------------------------------------------
+rng = random.Random(11)
+s = Sheet()
+s.width("A", 250)
+for c in range(1, 16):
+    s.width(col(c), 64)
+s.set("A1", "The next two weeks: will it rain, and how warm will it be?")
+s.set("A3", "Today's temperature (°C)"); s.set("B3", 16.5)
+s.set("A4", "Today's weather"); s.set("B4", "rain")
+s.set("A5", "Day of the year today"); s.set("B5", 120)
+s.set("A6", "Anomaly carried over a day"); s.set("B6", 0.75); s.set("C6", "AR(1) phi: a warm spell fades by a quarter a day")
+s.set("A7", "Day-to-day shock (°C)"); s.set("B7", 1.8)
+s.set("A9", "Day")
+s.set("A10", "Seasonal normal (°C)")
+s.set("A11", "Anomaly (°C)")
+s.set("A12", "Temperature (°C)")
+s.set("A13", "Weather")
+s.set("A14", "Rain?")
+s.set("A16", "After F5:")
+s.set("A17", "Chance of rain")
+s.set("A18", "Temperature, P10")
+s.set("A19", "Temperature, P90")
+for d in range(0, 15):
+    c = col(1 + d); p = col(d)
+    s.set(f"{c}9", d)
+    # Climatology: a year-long sine wave, warmest late July.
+    s.set(f"{c}10", f"=11+7*SIN(2*PI()*($B$5+{c}9-110)/365)")
+    if d == 0:
+        s.set(f"{c}11", "=B3-B10")
+        s.set(f"{c}13", "=B4")
+    else:
+        s.set(f"{c}11", f"=RAND.AR1({p}11,0,$B$6,$B$7)")
+        s.set(f"{c}13", f"=RAND.MARKOV({p}13,$A$23:$A$24,$B$23:$C$24)")
+        s.set(f"{c}17", f"=SIM.MEAN({c}14)")
+        s.set(f"{c}18", f"=SIM.PERCENTILE({c}12,0.1)")
+        s.set(f"{c}19", f"=SIM.PERCENTILE({c}12,0.9)")
+    s.set(f"{c}12", f"={c}10+{c}11")
+    s.set(f"{c}14", f'={c}13="rain"')
+s.set("A21", "Rain follows rain: a Markov chain, counted from the last 60 days")
+s.set("B22", "dry"); s.set("C22", "rain")
+s.set("A23", "dry"); s.set("A24", "rain")
+for r, frm in ((23, "dry"), (24, "rain")):
+    for c, to in (("B", "dry"), ("C", "rain")):
+        s.set(f"{c}{r}", f'=MARKOV.ESTIMATE("{frm}","{to}",$B$36:$B$95,1)')
+s.set("A25", "Long-run share of rainy days"); s.set("B25", '=MARKOV.STEADY("rain",A23:A24,B23:C24)')
+s.set("A26", "Rain a week from now, exactly"); s.set("B26", '=MARKOV.PROB(B4,"rain",A23:A24,B23:C24,7)')
+s.set("A27", "... and as simulated"); s.set("B27", "=H17")
+s.set("A28", "Rainy days in the next fortnight"); s.set("B28", '=COUNTIF(C13:P13,"rain")')
+s.set("A29", "Expected rainy days (F5)"); s.set("B29", "=SIM.MEAN(B28)")
+s.set("A30", "Chance of a day above 20°C"); s.set("B30", '=SIM.PROB(B31,">20")')
+s.set("A31", "Warmest day of the fortnight"); s.set("B31", "=MAX(C12:P12)")
+s.set("A32", "Select C12:P12 for the temperature fan; C14 or any Rain? cell for its odds.")
+s.set("A34", "Observed, last 60 days")
+s.set("A35", "Day"); s.set("B35", "Weather")
+state = "dry"
+for i in range(60):
+    r = 36 + i
+    s.set(f"A{r}", i - 60)
+    p_rain = 0.6 if state == "rain" else 0.25
+    state = "rain" if rng.random() < p_rain else "dry"
+    s.set(f"B{r}", state)
+s.fmt(" ".join(f"{col(1+d)}{r}" for d in range(15) for r in (10, 11, 12)) + " B3 B7", "0.0")
+s.fmt(" ".join(f"{col(1+d)}{r}" for d in range(1, 15) for r in (18, 19)), "0.0")
+s.fmt(" ".join(f"{col(1+d)}17" for d in range(1, 15)) + " B23 C23 B24 C24 B25 B26 B27 B30", "0%")
+s.fmt("B29 B31", "0.0")
+s.save("weather.tm")
+
+# ---- 7. Football ---------------------------------------------------------
+rng = random.Random(5)
+teams = ["Rovers", "United", "City", "Athletic", "Wanderers", "Albion"]
+strength = {"Rovers": (1.35, 0.8), "United": (1.25, 0.85), "City": (1.1, 1.0),
+            "Athletic": (0.95, 1.05), "Wanderers": (0.85, 1.15), "Albion": (0.75, 1.2)}
+
+def poisson(lam):
+    L, k, p = math.exp(-lam), 0, 1.0
+    while True:
+        p *= rng.random()
+        if p <= L:
+            return k
+        k += 1
+
+def play(h, a):
+    lam = 1.5 * strength[h][0] * strength[a][1]
+    mu = 1.15 * strength[a][0] * strength[h][1]
+    return poisson(lam), poisson(mu)
+
+last_season = [(h, a) for h in teams for a in teams if h != a]
+fixtures = [(h, a) for h in teams for a in teams if h != a]
+rng.shuffle(fixtures)
+played, remaining = fixtures[:18], fixtures[18:]
+history = [("last", h, a) + play(h, a) for h, a in last_season] + \
+          [("this", h, a) + play(h, a) for h, a in played]
+
+s = Sheet(iterations=20000)
+s.width("A", 110); s.width("B", 110); s.width("C", 120)
+for c in "DEFGHIJK":
+    s.width(c, 90)
+s.set("A1", "Who wins the league? Poisson goals, twelve matches to go")
+s.set("A3", "Team"); s.set("B3", "Points now"); s.set("C3", "Final (one future)"); s.set("D3", "Champion?")
+s.set("E3", "Title chance"); s.set("F3", "Top two"); s.set("G3", "Expected pts")
+s.set("H3", "Tie-break"); s.set("I3", "In top two?")
+first_r, last_r = 22, 22 + len(history) - 1
+fr = last_r + 4
+lr = fr + len(remaining) - 1
+for i, t in enumerate(teams):
+    r = 4 + i
+    s.set(f"A{r}", t)
+    s.set(f"B{r}", f"=SUMIF($B${first_r}:$B${last_r},A{r},$F${first_r}:$F${last_r})+SUMIF($C${first_r}:$C${last_r},A{r},$G${first_r}:$G${last_r})")
+    s.set(f"C{r}", f"=B{r}+SUMIF($A${fr}:$A${lr},A{r},$J${fr}:$J${lr})+SUMIF($B${fr}:$B${lr},A{r},$K${fr}:$K${lr})")
+    # Level on points, a coin decides, as goal difference would.
+    s.set(f"H{r}", f"=C{r}+RAND()/10")
+    s.set(f"D{r}", f"=H{r}=MAX($H$4:$H$9)")
+    s.set(f"I{r}", f"=H{r}>=LARGE($H$4:$H$9,2)")
+    s.set(f"E{r}", f"=SIM.MEAN(D{r})")
+    s.set(f"F{r}", f"=SIM.MEAN(I{r})")
+    s.set(f"G{r}", f"=SIM.MEAN(C{r})")
+s.set("A11", "Elo, for comparison")
+s.set("A12", "Rovers' rating"); s.set("B12", 1640)
+s.set("A13", "United's rating"); s.set("B13", 1610)
+s.set("A14", "Rovers at home: expected score"); s.set("B14", "=ELO.EXPECT(B12,B13,65)")
+s.set("A15", "... after beating United"); s.set("B15", "=ELO.UPDATE(B12,B14,1,20)")
+s.set("A17", "Press F5, then read columns E to G. Select D4 for the leaders' odds.")
+s.set("A18", "Expected goals come from each side's attack and the other's defence")
+s.set("A19", "in last season's results and this season's so far.")
+s.set("A21", "Season"); s.set("B21", "Home"); s.set("C21", "Away"); s.set("D21", "Home goals"); s.set("E21", "Away goals")
+s.set("F21", "Home pts"); s.set("G21", "Away pts")
+for i, (season, h, a, hg, ag) in enumerate(history):
+    r = first_r + i
+    s.set(f"A{r}", season); s.set(f"B{r}", h); s.set(f"C{r}", a)
+    s.set(f"D{r}", hg); s.set(f"E{r}", ag)
+    # Only this season's matches earn points.
+    s.set(f"F{r}", f'=IF(A{r}="this",IF(D{r}>E{r},3,IF(D{r}=E{r},1,0)),0)')
+    s.set(f"G{r}", f'=IF(A{r}="this",IF(E{r}>D{r},3,IF(D{r}=E{r},1,0)),0)')
+s.set(f"A{fr - 2}", "Still to play")
+s.set(f"A{fr - 1}", "Home"); s.set(f"B{fr - 1}", "Away"); s.set(f"C{fr - 1}", "xG home"); s.set(f"D{fr - 1}", "xG away")
+s.set(f"E{fr - 1}", "Home win"); s.set(f"F{fr - 1}", "Draw"); s.set(f"G{fr - 1}", "Away win")
+s.set(f"H{fr - 1}", "Goals (h)"); s.set(f"I{fr - 1}", "Goals (a)"); s.set(f"J{fr - 1}", "Home pts"); s.set(f"K{fr - 1}", "Away pts")
+res = f"$B${first_r}:$B${last_r},$C${first_r}:$C${last_r},$D${first_r}:$D${last_r},$E${first_r}:$E${last_r}"
+for i, (h, a) in enumerate(remaining):
+    r = fr + i
+    s.set(f"A{r}", h); s.set(f"B{r}", a)
+    s.set(f"C{r}", f"=MATCH.XG(A{r},B{r},{res},1)")
+    s.set(f"D{r}", f"=MATCH.XG(A{r},B{r},{res},2)")
+    s.set(f"E{r}", f'=POISSON.MATCH(C{r},D{r},"home",-0.05)')
+    s.set(f"F{r}", f'=POISSON.MATCH(C{r},D{r},"draw",-0.05)')
+    s.set(f"G{r}", f'=POISSON.MATCH(C{r},D{r},"away",-0.05)')
+    s.set(f"H{r}", f"=RAND.POISSON(C{r})")
+    s.set(f"I{r}", f"=RAND.POISSON(D{r})")
+    s.set(f"J{r}", f"=IF(H{r}>I{r},3,IF(H{r}=I{r},1,0))")
+    s.set(f"K{r}", f"=IF(I{r}>H{r},3,IF(H{r}=I{r},1,0))")
+s.fmt(" ".join(f"{c}{r}" for c in "EF" for r in range(4, 10)) + " B14", "0%")
+s.fmt(" ".join(f"G{r}" for r in range(4, 10)), "0.0")
+s.fmt(" ".join(f"{c}{r}" for c in "CD" for r in range(fr, lr + 1)), "0.00")
+s.fmt(" ".join(f"{c}{r}" for c in "EFG" for r in range(fr, lr + 1)), "0%")
+s.fmt(" ".join(f"H{r}" for r in range(4, 10)), "0.00")
+s.fmt("B15", "0")
+s.save("football.tm")
+
+# ---- 8. Stocks -----------------------------------------------------------
+# A history whose fitted drift lands near the 9% it was drawn with: two
+# years pin a drift down only to about 20% either way, a lesson the sheet
+# states rather than one its example should stumble into.
+for seed in range(1, 1000):
+    rng = random.Random(seed)
+    p, logs = 50.0, []
+    for w in range(104):
+        r = (0.09 - 0.28 ** 2 / 2) / 52 + 0.28 / math.sqrt(52) * rng.gauss(0, 1)
+        logs.append(r)
+    m = sum(logs) / len(logs)
+    sd = math.sqrt(sum((x - m) ** 2 for x in logs) / (len(logs) - 1))
+    if abs(m * 52 + sd * sd * 52 / 2 - 0.09) < 0.02:
+        break
+rng = random.Random(seed)
+s = Sheet()
+s.width("A", 60); s.width("B", 90); s.width("C", 90); s.width("D", 110); s.width("F", 300); s.width("G", 110)
+s.set("A1", "A share price, a year ahead: two random walks fitted to two years of history")
+s.set("A3", "Week"); s.set("B3", "Price (GBM)"); s.set("C3", "Log return"); s.set("D3", "Price (bootstrap)")
+price = 50.0
+hist_last = 3 + 104
+for w in range(0, 105):
+    r = 4 + w
+    if w > 0:
+        price *= math.exp((0.09 - 0.28 ** 2 / 2) / 52 + 0.28 / math.sqrt(52) * rng.gauss(0, 1))
+    s.set(f"A{r}", w - 104)
+    s.set(f"B{r}", round(price, 2))
+    if w > 0:
+        s.set(f"C{r}", f"=LN(B{r}/B{r-1})")
+    s.set(f"D{r}", f"=B{r}")
+last = 4 + 104
+for w in range(1, 53):
+    r = last + w
+    s.set(f"A{r}", w)
+    # Geometric Brownian motion, a week a step, with the fitted drift and volatility.
+    s.set(f"B{r}", f"=B{r-1}*EXP(($G$4-$G$5^2/2)/52+$G$5/SQRT(52)*RAND.NORMAL(0,1))")
+    # History resampled: each future week is one of the past weeks' returns.
+    s.set(f"D{r}", f"=D{r-1}*EXP(RAND.BOOTSTRAP($C$5:$C${last}))")
+end = last + 52
+s.set("F3", "Fitted to the history")
+s.set("F4", "Drift, a year"); s.set("G4", f"=DRIFT(B4:B{last},52)")
+s.set("F5", "Volatility, a year"); s.set("G5", f"=VOLATILITY(B4:B{last},52)")
+s.set("F6", "Price today"); s.set("G6", f"=B{last}")
+s.set("F8", "A year ahead, in theory (GBM)")
+s.set("F9", "Median"); s.set("G9", "=GBM.PERCENTILE(G6,0.5,G4,G5,1)")
+s.set("F10", "P10"); s.set("G10", "=GBM.PERCENTILE(G6,0.1,G4,G5,1)")
+s.set("F11", "P90"); s.set("G11", "=GBM.PERCENTILE(G6,0.9,G4,G5,1)")
+s.set("F12", "Chance of ending higher"); s.set("G12", "=GBM.PROB(G6,G6,G4,G5,1)")
+s.set("F14", "A year ahead, simulated (F5)")
+s.set("F15", "Median, GBM"); s.set("G15", f"=SIM.MEDIAN(B{end})")
+s.set("F16", "Median, bootstrap"); s.set("G16", f"=SIM.MEDIAN(D{end})")
+s.set("F17", "Chance of ending higher"); s.set("G17", f'=SIM.PROB(B{end},">"&G6)')
+s.set("F18", "Value at risk, 95%"); s.set("G18", f"=G6-SIM.PERCENTILE(B{end},0.05)")
+s.set("F19", "Worst fall on the way (median)"); s.set("G19", "=SIM.MEDIAN(G20)")
+s.set("F20", "Worst fall on the way (one future)"); s.set("G20", f"=DRAWDOWN(B{last}:B{end})")
+s.set("F21", "Chance of a 30% fall at some point"); s.set("G21", '=SIM.PROB(G20,">=0.3")')
+s.set("F23", "What the market charges")
+s.set("F24", "A call at +10%, a year, 3% rates"); s.set("G24", "=BLACKSCHOLES(G6,G6*1.1,3%,G5,1)")
+s.set("F26", f"Select B4:B{end} or D4:D{end} for the fans.")
+s.set("F27", "Two years pin the drift down only to about 20% either way;")
+s.set("F28", "the volatility is known far better. And this is not advice:")
+s.set("F29", "a random walk fitted to the past knows nothing of the news.")
+s.fmt(" ".join(f"{c}{r}" for c in "BD" for r in range(4, end + 1)) + " G6 G9 G10 G11 G15 G16 G18 G24", "0.00")
+s.fmt(" ".join(f"C{r}" for r in range(5, last + 1)), "0.0%")
+s.fmt("G4 G5 G12 G17 G19 G20 G21", "0.0%")
+s.save("stocks.tm")
+print("ok, more")

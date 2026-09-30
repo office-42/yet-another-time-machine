@@ -230,36 +230,60 @@ draw_histogram (TmChart *self, cairo_t *cr, PangoLayout *layout, int width, int 
 #undef XOF
 }
 
+/* Whether a cell reads as a heading: certain, and either typed in, text,
+ * or a whole number -- a year, a day, a name -- rather than a figure
+ * worked out, such as a seasonal normal of 12.3176. */
+static gboolean
+heading_like (TmSheet *sheet, int row, int col)
+{
+  const char *input = tm_sheet_get_input (sheet, row, col);
+  const TmValue *v;
+
+  if (input == NULL || tm_sheet_is_random (sheet, row, col))
+    return FALSE;
+  if (input[0] != '=')
+    return TRUE;
+  v = tm_sheet_get_value (sheet, row, col);
+  return v->type == TM_VALUE_TEXT
+         || (v->type == TM_VALUE_NUMBER && v->as.number == floor (v->as.number));
+}
+
 /* The line of headings the fan's axis is labelled with: of the rows above
  * a row of cells (or the columns left of a column), the one with the most
- * cells that hold plain, certain values -- years, months, dates -- the
- * nearest winning a tie.  -1 if none has them for half the points. */
+ * cells that read as headings -- names counting double, as the likelier
+ * labels -- the nearest winning a tie.  -1 if none has them for half the
+ * points.  *names says whether the headings are names, not times: an axis
+ * of teams or products, along which no path runs. */
 static int
-heading_line (TmSheet *sheet, const TmRange *r, gboolean across)
+heading_line (TmSheet *sheet, const TmRange *r, gboolean across, gboolean *names)
 {
-  int best = -1, best_count = 0;
+  int best = -1, best_count = 0, best_texts = 0;
   int n = across ? tm_range_cols (r) : tm_range_rows (r);
   int start = across ? r->row0 - 1 : r->col0 - 1;
 
   for (int line = start; line >= 0 && line >= start - 20; line--)
     {
-      int count = 0;
+      int count = 0, texts = 0;
 
       for (int i = 0; i < n; i++)
         {
           int row = across ? line : r->row0 + i;
           int col = across ? r->col0 + i : line;
 
-          if (tm_sheet_get_input (sheet, row, col) != NULL
-              && !tm_sheet_is_random (sheet, row, col))
-            count++;
+          if (heading_like (sheet, row, col))
+            {
+              count++;
+              texts += tm_sheet_get_value (sheet, row, col)->type == TM_VALUE_TEXT;
+            }
         }
-      if (count > best_count)
+      if (count + texts > best_count + best_texts)
         {
           best = line;
           best_count = count;
+          best_texts = texts;
         }
     }
+  *names = best_texts * 2 >= n;
   return best_count * 2 >= n ? best : -1;
 }
 
@@ -268,11 +292,9 @@ point_label (TmSheet *sheet, int row, int col, gboolean across, int heading)
 {
   if (heading >= 0)
     {
-      const TmValue *v = across ? tm_sheet_get_value (sheet, heading, col)
-                                : tm_sheet_get_value (sheet, row, heading);
-      if (v->type != TM_VALUE_EMPTY)
-        return tm_value_to_text (v);
-      return g_strdup ("");
+      int r = across ? heading : row, c = across ? col : heading;
+
+      return tm_sheet_get_display (sheet, r, c);
     }
   if (across)
     {
@@ -284,7 +306,7 @@ point_label (TmSheet *sheet, int row, int col, gboolean across, int heading)
 
 static void
 draw_fan (TmChart *self, cairo_t *cr, PangoLayout *layout, int width, int height,
-          Point *pts, int n, gboolean percent)
+          Point *pts, int n, gboolean percent, gboolean names)
 {
   double lo = INFINITY, hi = -INFINITY, step;
   double x0 = MARGIN_L, x1 = width - MARGIN_R, y0 = MARGIN_T, y1 = height - MARGIN_B;
@@ -366,7 +388,7 @@ draw_fan (TmChart *self, cairo_t *cr, PangoLayout *layout, int width, int height
       if (pts[i].raw != NULL)
         n_raw = pts[i].n_raw;
     cairo_set_line_width (cr, 0.8);
-    for (int k = 0; k < 12 && n_raw > 0; k++)
+    for (int k = 0; k < 12 && n_raw > 0 && !names; k++)
       {
         int it = (int) (((gint64) k * 7919 + 13) % n_raw);
         gboolean pen = FALSE;
@@ -495,7 +517,8 @@ draw (TmChart *self, cairo_t *cr, int width, int height)
       int n = across ? tm_range_cols (r) : tm_range_rows (r);
       Point *pts = g_new0 (Point, n);
       int simulated = 0;
-      int heading = heading_line (self->sheet, r, across);
+      gboolean names = FALSE;
+      int heading = heading_line (self->sheet, r, across, &names);
 
       for (int i = 0; i < n; i++)
         {
@@ -530,7 +553,8 @@ draw (TmChart *self, cairo_t *cr, int width, int height)
         }
       if (simulated > 0)
         draw_fan (self, cr, layout, width, height, pts, n,
-                  tm_format_is_percent (tm_sheet_get_format (self->sheet, r->row1, r->col1)));
+                  tm_format_is_percent (tm_sheet_get_format (self->sheet, r->row1, r->col1)),
+                  names);
       else
         draw_message (cr, layout, width, height,
                       sim == NULL ? "Press F5 to run the simulation."

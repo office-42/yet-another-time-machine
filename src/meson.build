@@ -18,6 +18,7 @@ tm_core_sources = files(
   'formula/tm-fn-random.c',
   'formula/tm-fn-forecast.c',
   'formula/tm-fn-sim.c',
+  'formula/tm-fn-domains.c',
   'model/tm-sim.c',
   'model/tm-sheet.c',
   'io/tm-file.c',

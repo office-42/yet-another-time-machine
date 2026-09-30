@@ -36,15 +36,25 @@ What exists, and what comes next, roughly in order.
 - In-cell editing, and point mode: clicking cells while typing a formula
   inserts their references.
 - Sample paths drawn through the fan chart.
+- Methods for particular futures:
+  - weather: Markov chains, AR(1), `BRIER.SKILL`;
+  - sport: Poisson match models with Dixon–Coles, expected goals from
+    results, Elo;
+  - markets: GBM fitted to prices, `BLACKSCHOLES`, `DRAWDOWN`;
+  - general: the naive, seasonal-naive and drift benchmarks, damped
+    trend, and logistic, Gompertz and Bass curves.
+
+  Examples for weather, football and stock prices come with them.
+- Cells that cannot be random are frozen during a simulation.
 - Terminal front-end and smoke test; CI on Linux.
 
 ## Next
 
 - **Correlated inputs**, through the Iman–Conover rank reordering.
-- **More forecasting**: damped trend (the most robust automatic method),
-  simple exponential smoothing, the naive, seasonal naive and drift
-  benchmarks, AR(1) mean reversion, logistic and Bass diffusion curves,
-  and block bootstrap of a series.
+- **More forecasting**: fitting logistic and Bass curves to data, block
+  bootstrap of a series, multiplicative Holt–Winters, ARIMA.
+- **More domains**: ranking models for elections (polls to vote shares),
+  survival curves for durations, queueing for service times.
 - **More judgment**: Beta-binomial base rates, Gott's rule, and
   calibration tables.
 - **Convergence**: stopping automatically once the chosen statistics are

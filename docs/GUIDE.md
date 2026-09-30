@@ -106,11 +106,19 @@ Operators, loosest first: comparison `= <> < > <= >=`, `&`, `+ -`,
 families are:
 
 - **Random** (`RAND.*`): distributions an uncertain cell draws from.
-- **Processes**: `RAND.GBM`.
+- **Processes**: Markov chains (`RAND.MARKOV`, `MARKOV.PROB`,
+  `MARKOV.STEADY`, `MARKOV.ESTIMATE`), mean reversion (`RAND.AR1`),
+  `RAND.GBM` and `RAND.SPLITNORMAL`.
+- **Sports**: `POISSON.MATCH`, `POISSON.SCORE`, `MATCH.XG`, `ELO.EXPECT`,
+  `ELO.UPDATE`.
+- **Markets**: `DRIFT`, `VOLATILITY`, `GBM.PROB`, `GBM.PERCENTILE`,
+  `BLACKSCHOLES`, `DRAWDOWN`.
 - **Simulation** (`SIM.*`): statistics over the last simulation's futures.
-- **Forecasting**: regression, exponential smoothing, growth.
+- **Forecasting**: regression, exponential smoothing, damped trend, AR(1),
+  the naive and drift benchmarks, and growth curves (`LOGISTIC`,
+  `GOMPERTZ`, `BASS`).
 - **Judgment**: `BAYES`, `EXTREMIZE`, `POOL.ODDS`, `LAPLACE`, `REFCLASS`,
-  `BRIER`, `LOGSCORE`.
+  `BRIER`, `BRIER.SKILL`, `LOGSCORE`.
 - **Statistics**, **Distributions**, **Maths**, **Logic**, **Text**,
   **Lookup** and **Finance**: the ordinary spreadsheet functions,
   behaving as Excel's do.

@@ -1,7 +1,8 @@
 # Time Machine
 
 **Time Machine** (the binary is `timemachine`) is a spreadsheet for making
-predictions about the future. It looks and works like Excel, and every
+predictions about the future: tomorrow's weather, who wins the league, where
+a share price will be in a year, what a product launch will earn. It looks and works like Excel, and every
 number in it can be a *range* instead of a single guess. Press **F5** and
 it lives through ten thousand possible futures. For any cell it then shows
 what could happen: the most likely outcome, the 90% range, the chance of a
@@ -58,14 +59,60 @@ Select one uncertain cell to see a histogram of its futures. Select a row
 or column of them — a quantity month by month — to see a fan chart that
 grows out of the history before it:
 
-![A fan chart of retirement savings over 25 years: a median line rising from 100k to about 790k, inside a 50% band and a wider 90% band that spreads to over 2M](docs/images/retirement.png)
+![A fan chart of retirement savings over 25 years: a median line rising from 100k to about 780k, inside a 50% band and a wider 90% band that spreads to over 2M, with a dozen single futures drawn faintly through it](docs/images/retirement.png)
+
+## What it can predict
+
+The same machinery works for any kind of future. What changes between
+domains is the method used to describe how the future unfolds, and there
+are functions for the standard methods of each.
+
+**Weather.** Whether it rains tomorrow depends on whether it rains today.
+A Markov chain captures that: `MARKOV.ESTIMATE` counts the transitions in
+the last 60 days, `RAND.MARKOV` walks the chain forward one day at a time,
+and `MARKOV.PROB` and `MARKOV.STEADY` give the exact answers to check the
+simulation against. Temperature is the seasonal normal plus an anomaly
+that fades by a quarter a day (`RAND.AR1`). `BRIER.SKILL` scores rain
+forecasts against climatology, as weather services score theirs.
+
+![The weather example: fourteen days of seasonal normal, anomaly, temperature and rain drawn from a Markov chain; the chance of rain falling from 66% tomorrow towards the 37% long-run share; and a fan chart of the fortnight's temperatures](docs/images/weather.png)
+
+**Football.** Goals are Poisson counts. `MATCH.XG` estimates each side's
+expected goals from attacking and defensive strength in past results.
+`POISSON.MATCH` turns those into home/draw/away chances, with Dixon and
+Coles' low-score correction, and `POISSON.SCORE` gives exact scores. The
+example plays the rest of a season 20,000 times to give every team's
+title chance. `ELO.EXPECT` and `ELO.UPDATE` do Elo ratings.
+
+![The football example: a six-team league with twelve matches left; points now, one simulated final table, and title chances of 82%, 13% and 1%; and a fan of each team's final points](docs/images/football.png)
+
+**Stock prices.** `DRIFT` and `VOLATILITY` fit geometric Brownian motion
+to a price history. The example then walks two random walks a year
+forward: one with normal weekly returns, and one resampling the history's
+own returns (`RAND.BOOTSTRAP`), which keeps its fat tails. `GBM.PROB` and
+`GBM.PERCENTILE` give the exact answers. The example also reports value
+at risk, the worst fall along the way (`DRAWDOWN`), and what the market
+charges for an option (`BLACKSCHOLES`).
+
+![The stock example: two years of weekly prices, fitted drift of 8.5% and volatility of 32%, and a fan chart of the next year growing out of the price history, with single futures drawn through it](docs/images/stocks.png)
+
+**Anything that grows or spreads.** Every forecast should first be
+checked against the naive, seasonal-naive and drift benchmarks
+(`FORECAST.DRIFT`, `FORECAST.SNAIVE`). There is Holt's damped trend
+(`FORECAST.DAMPED`), mean reversion (`FORECAST.AR1`), and the S-curves
+of adoption: `LOGISTIC`, `GOMPERTZ`, and Bass diffusion (`BASS`) for a
+new product's take-up. `RAND.SPLITNORMAL` draws the Bank of England's
+lopsided fan-chart distribution.
 
 ## Examples
 
-**File › Open Example** has five models. Each one shows a different method:
+**File › Open Example** has eight models. Each one shows a different method:
 
 | Example | Method |
 |---|---|
+| Weather | A Markov chain for rain, estimated from 60 days of observations; an AR(1) temperature anomaly around a seasonal normal; the exact Markov answers beside the simulated ones. |
+| Football | Expected goals from attack and defence strengths, Poisson match probabilities with the Dixon–Coles correction, the rest of the season simulated for title chances, and Elo. |
+| Stock price | Drift and volatility fitted to two years of prices; geometric Brownian motion and a bootstrap of the history's own returns; value at risk, drawdown and an option's price. |
 | Product launch | Monte Carlo with PERT, lognormal, triangular and Bernoulli inputs. Also shows the chance of a loss, expected shortfall, what drives profit, and the *flaw of averages* (the plan built from average inputs is not the average outcome). |
 | Sales forecast | Holt–Winters exponential smoothing on three years of seasonal sales, with the forecast drawn as a fan out of the history. |
 | Retirement savings | A 25-year geometric random walk of market returns: the chance of reaching a goal, compared with the straight-line plan. |
@@ -139,7 +186,8 @@ This is an early version. The engine, the simulator and the forecasting
 functions are done and checked. The window covers the essentials: a grid,
 a formula bar, fill, copy and paste, undo, number formats, the
 forecast panel, in-cell editing and point mode.
-[docs/ROADMAP.md](docs/ROADMAP.md) lists what comes next.
+[docs/ROADMAP.md](docs/ROADMAP.md) lists what comes next. There are 165
+functions; **Help › Functions** (F1) lists them all.
 
 ## License
 

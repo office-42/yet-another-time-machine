@@ -53,7 +53,15 @@ is how the grid knows what to tint and the simulator knows what to keep.
    a `SIM.*` function names. If that would cost more than 32 million
    doubles, only the `SIM.*` ones.
 4. Runs the remaining iterations, each a new generation that evaluates
-   only the kept cells. What they depend on is computed on demand.
+   only the kept cells. What they depend on is computed on demand, except
+   for cells that cannot be random. Those keep the value the first
+   iteration gave them. "Cannot be random" is decided from the formulas
+   before the run: the cell does not draw, and neither does anything it
+   names, however indirectly. It is not decided from what the first
+   iteration happened to do, because an `IF` may take a random branch in
+   another future. This is what keeps a model with a large history (the
+   Markov estimates in the weather example, the expected goals in the
+   football one) as fast as one without.
 5. Swaps the new results in and recalculates once more, so that the
    `SIM.*` functions see them.
 

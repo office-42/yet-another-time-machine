@@ -226,6 +226,114 @@ near A3 0.3 1e-10
 near A4 12.706204736 1e-7
 near A5 0.9999975326 1e-9
 
+# The methods particular futures are forecast with, against closed forms.
+run 'weather, sport, markets' 'S1 = dry
+S2 = rain
+T1 = 0.75
+U1 = 0.25
+T2 = 0.4
+U2 = 0.6
+A1 = =MARKOV.STEADY("rain",S1:S2,T1:U2)
+A1
+A2 = =MARKOV.PROB("rain","rain",S1:S2,T1:U2,2)
+A2
+B1 = rain
+C1 = =RAND.MARKOV(B1,$S$1:$S$2,$T$1:$U$2)
+D1 = =RAND.MARKOV(C1,$S$1:$S$2,$T$1:$U$2)
+E1 = =D1="rain"
+F1 = =SIM.MEAN(E1)
+V1 = rain
+V2 = rain
+V3 = dry
+V4 = rain
+V5 = dry
+V6 = dry
+A3 = =MARKOV.ESTIMATE("rain","dry",V1:V6)
+A3
+A4 = =POISSON.MATCH(1.5,1.1,"home")+POISSON.MATCH(1.5,1.1,"draw")+POISSON.MATCH(1.5,1.1,"away")
+A4
+A5 = =POISSON.SCORE(1.2,0.8,0,0)
+A5
+A6 = =ELO.EXPECT(1600,1500)
+A6
+A7 = =BLACKSCHOLES(100,100,0.05,0.2,1)
+A7
+A8 = =BLACKSCHOLES(100,100,0.05,0.2,1,"put")
+A8
+A9 = =GBM.PROB(100,100,0.08,0.25,1)
+A9
+A10 = =BASS(5,0.03,0.38)
+A10
+A11 = =FORECAST.DRIFT(2,W1:W4)
+W1 = 10
+W2 = 12
+W3 = 13
+W4 = 16
+A11
+A12 = =FORECAST.SNAIVE(1,W1:W4,2)
+A12
+A13 = =DRAWDOWN(W1:W4)
+A13
+X1 = 100
+X2 = 120
+X3 = 90
+X4 = 130
+A14 = =DRAWDOWN(X1:X4)
+A14
+A15 = =BRIER.SKILL(Y1:Y4,Z1:Z4)
+Y1 = 0.9
+Y2 = 0.1
+Y3 = 0.8
+Y4 = 0.3
+Z1 = 1
+Z2 = 0
+Z3 = 1
+Z4 = 0
+A15
+R1 = 10
+R2 = 12
+R3 = 14
+R4 = 16
+R5 = 18
+R6 = 20
+R7 = 22
+R8 = 24
+A17 = =FORECAST.DAMPED(3,R1:R8,1)
+A17
+Q1 = 16
+Q2 = 8
+Q3 = 4
+Q4 = 2
+Q5 = 1
+Q6 = 0.5
+A18 = =FORECAST.AR1(1,Q1:Q6)
+A18
+A16 = =RAND.SPLITNORMAL(10,1,3)
+B16 = =SIM.MEAN(A16)
+simulate
+F1
+B16
+'
+near A1 0.3846153846 1e-9
+near A2 0.46 1e-9
+near A3 0.6666666667 1e-9
+near A4 1 1e-9
+near A5 0.1353352832 1e-9
+near A6 0.6400649998 1e-9
+near A7 10.45058357 1e-6
+near A8 5.573526022 1e-6
+near A9 0.5773035262 1e-6
+near A10 0.3311986425 1e-6
+near A11 20 1e-9
+near A12 13 1e-9
+near A13 0 1e-12
+near A14 0.25 1e-12
+near A15 0.85 1e-9
+near A17 30 1e-6
+near A18 0.25 1e-9
+near F1 0.46 0.015
+near B16 11.5958 0.06
+
 # The same seed gives the same futures.
 run 'seeds' 'A1 = =RAND.NORMAL(0,1)
 B1 = =SIM.SAMPLE(A1,7)
@@ -373,11 +481,27 @@ want "^C1${tab}tab${tab}and \\\\ backslash"
 want "^D1${tab}\\\$1,235${tab}"
 want "^simulated 5000 iterations, seed 9"
 
-for f in launch sales retirement project judgment; do
+for f in launch sales retirement project judgment weather football stocks; do
   run "example $f" 'simulate
 ' "$samples/$f.tm"
-  want "^simulated 10000 iterations"
+  want "^simulated [0-9]* iterations"
 done
+
+run 'example figures, weather' 'Z1 = =B26
+Z2 = =H17
+simulate
+Z1
+Z2
+' "$samples/weather.tm"
+near Z2 0.37 0.02
+
+run 'example figures, markets' 'Z1 = =G12
+Z2 = =G17
+simulate
+Z1
+Z2
+' "$samples/stocks.tm"
+near Z2 0.542 0.02
 
 run 'example figures' 'Z1 = =B17
 Z2 = =B18

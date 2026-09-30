@@ -130,5 +130,7 @@ extern const TmFunction tm_fn_forecast[];
 extern const int        tm_fn_forecast_count;
 extern const TmFunction tm_fn_sim[];
 extern const int        tm_fn_sim_count;
+extern const TmFunction tm_fn_domains[];
+extern const int        tm_fn_domains_count;
 
 G_END_DECLS

@@ -60,6 +60,7 @@ ensure_functions (void)
       add_table (all, tm_fn_random, tm_fn_random_count);
       add_table (all, tm_fn_forecast, tm_fn_forecast_count);
       add_table (all, tm_fn_sim, tm_fn_sim_count);
+      add_table (all, tm_fn_domains, tm_fn_domains_count);
       n_sorted = (int) all->len;
       sorted = (const TmFunction **) g_ptr_array_free (all, FALSE);
       qsort (sorted, (size_t) n_sorted, sizeof *sorted, compare_functions);

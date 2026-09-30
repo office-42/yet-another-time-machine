@@ -275,9 +275,24 @@ tm_value_compare (const TmValue *a, const TmValue *b)
       return ea.as.number < eb.as.number ? -1 : ea.as.number > eb.as.number;
     case TM_VALUE_TEXT:
       {
-        char *x = g_utf8_casefold (ea.as.text, -1);
-        char *y = g_utf8_casefold (eb.as.text, -1);
-        int r = g_utf8_collate (x, y);
+        char *x, *y;
+        int r;
+        gboolean ascii = TRUE;
+
+        /* Plain ASCII, as most labels and states are, compares without
+         * folding and collating copies. */
+        for (const char *s = ea.as.text; *s != '\0' && ascii; s++)
+          ascii = (guchar) *s < 0x80;
+        for (const char *s = eb.as.text; *s != '\0' && ascii; s++)
+          ascii = (guchar) *s < 0x80;
+        if (ascii)
+          {
+            r = g_ascii_strcasecmp (ea.as.text, eb.as.text);
+            return r < 0 ? -1 : r > 0;
+          }
+        x = g_utf8_casefold (ea.as.text, -1);
+        y = g_utf8_casefold (eb.as.text, -1);
+        r = g_utf8_collate (x, y);
 
         g_free (x);
         g_free (y);

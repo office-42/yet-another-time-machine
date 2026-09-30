@@ -21,6 +21,8 @@ typedef struct {
   guint     gen;         /* the generation value belongs to */
   gboolean  computing;
   gboolean  random;      /* the value is a draw, here or upstream */
+  guint8    may_draw;    /* during a simulation: 0 unknown, 1 working it
+                          * out, 2 could be random, 3 cannot be */
 } Cell;
 
 /* One change, for undo: what a cell held (or its format) before. */
@@ -48,6 +50,9 @@ struct _TmSheet {
    * futures visit the strata. */
   GHashTable   *strata;      /* guint64 (cell key * 64 + slot) -> int[] */
   int           slot;
+  /* While a simulation runs past its first future: cells that cannot be
+   * random keep the value the first gave them. */
+  gboolean      freezing;
 
   /* Which draw every random cell makes: a cell's stream is seeded from
    * these and from where the cell is, and from nothing else. */
@@ -189,7 +194,12 @@ cell_value (gpointer data, int row, int col)
       if (c->computing)
         return &CIRCULAR;
       if (c->gen != sheet->gen)
-        compute (sheet, c, row, col);
+        {
+          if (sheet->freezing && c->may_draw == 3)
+            c->gen = sheet->gen;
+          else
+            compute (sheet, c, row, col);
+        }
       else if (c->random)
         sheet->ctx.random = TRUE;
     }
@@ -851,6 +861,69 @@ sample_of (const TmValue *v)
   return NAN;
 }
 
+/* Whether a cell could ever be random: it draws itself, or a cell it
+ * names could be.  Worked out from the formulas, not from one run of
+ * them, because a branch of an IF not taken in one future can be taken in
+ * the next.  Depth first, remembering answers; a cycle counts as not
+ * random (it is #CIRC! in any case). */
+static gboolean may_draw (TmSheet *sheet, Cell *c);
+
+typedef struct {
+  TmSheet *sheet;
+  gboolean found;
+} MayDraw;
+
+static void
+may_draw_range (const TmRange *range, gpointer data)
+{
+  MayDraw *m = data;
+  gint64 area = (gint64) tm_range_rows (range) * tm_range_cols (range);
+
+  if (m->found)
+    return;
+  if (area <= 4096)
+    {
+      for (int r = range->row0; r <= range->row1 && !m->found; r++)
+        for (int col = range->col0; col <= range->col1 && !m->found; col++)
+          {
+            Cell *c = lookup (m->sheet, r, col);
+            if (c != NULL && may_draw (m->sheet, c))
+              m->found = TRUE;
+          }
+      return;
+    }
+  {
+    GHashTableIter iter;
+    gpointer key, value;
+
+    g_hash_table_iter_init (&iter, m->sheet->cells);
+    while (!m->found && g_hash_table_iter_next (&iter, &key, &value))
+      {
+        guint64 k = *(guint64 *) key;
+        if (tm_range_contains (range, tm_key_row (k), tm_key_col (k)) && may_draw (m->sheet, value))
+          m->found = TRUE;
+      }
+  }
+}
+
+static gboolean
+may_draw (TmSheet *sheet, Cell *c)
+{
+  MayDraw m = { sheet, FALSE };
+
+  if (c->may_draw >= 2)
+    return c->may_draw == 2;
+  if (c->may_draw == 1 || c->formula == NULL)
+    return FALSE;
+  c->may_draw = 1;
+  if (c->draws)
+    m.found = TRUE;
+  else
+    tm_formula_foreach_range (c->formula, NULL, may_draw_range, &m);
+  c->may_draw = m.found ? 2 : 3;
+  return m.found;
+}
+
 /* Keeping samples for every uncertain cell costs a double per cell per
  * iteration; past this many the sheet keeps only the cells SIM.* names. */
 #define SAMPLE_BUDGET (32 * 1000 * 1000)
@@ -886,7 +959,12 @@ tm_sheet_simulate (TmSheet *sheet, TmSimProgress progress, gpointer data)
   sheet->stream_index = 0;
   if (latin)
     sheet->strata = g_hash_table_new_full (g_int64_hash, g_int64_equal, g_free, g_free);
+  for (guint i = 0; i < n_keys; i++)
+    ((Cell *) g_hash_table_lookup (sheet->cells, &keys[i]))->may_draw = 0;
+  for (guint i = 0; i < n_keys; i++)
+    may_draw (sheet, g_hash_table_lookup (sheet->cells, &keys[i]));
   evaluate_all (sheet);
+  sheet->freezing = TRUE;
   for (guint i = 0; i < n_keys; i++)
     {
       Cell *c = g_hash_table_lookup (sheet->cells, &keys[i]);
@@ -937,6 +1015,7 @@ tm_sheet_simulate (TmSheet *sheet, TmSimProgress progress, gpointer data)
   g_array_free (targets, TRUE);
   g_hash_table_destroy (wanted);
   g_clear_pointer (&sheet->strata, g_hash_table_destroy);
+  sheet->freezing = FALSE;
 
   if (!done)
     {

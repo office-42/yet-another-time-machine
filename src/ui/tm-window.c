@@ -1223,6 +1223,7 @@ action_functions (GSimpleAction *a, GVariant *p, gpointer data)
   const TmFunction *const *list = tm_function_list (&n);
   static const char *const order[] = {
     "Random", "Processes", "Simulation", "Forecasting", "Judgment",
+    "Sports", "Markets",
     "Statistics", "Distributions", "Maths", "Logic", "Text", "Lookup", "Finance"
   };
 
@@ -1334,11 +1335,25 @@ build_menu (void)
   ADD (section, "_New", "win.new", NULL);
   ADD (section, "_Open…", "win.open", NULL);
   examples = g_menu_new ();
-  ADD (examples, "Product launch (profit at risk)", "win.open-example::launch.tm", NULL);
-  ADD (examples, "Sales forecast (exponential smoothing)", "win.open-example::sales.tm", NULL);
-  ADD (examples, "Retirement savings (random walk)", "win.open-example::retirement.tm", NULL);
-  ADD (examples, "Project schedule (PERT)", "win.open-example::project.tm", NULL);
-  ADD (examples, "Forecasting tournament (Brier scores)", "win.open-example::judgment.tm", NULL);
+  {
+    GMenu *part = g_menu_new ();
+    ADD (part, "Weather: the next two weeks (Markov chain, AR(1))", "win.open-example::weather.tm", NULL);
+    ADD (part, "Football: who wins the league? (Poisson goals)", "win.open-example::football.tm", NULL);
+    ADD (part, "Stock price: a year ahead (GBM, bootstrap)", "win.open-example::stocks.tm", NULL);
+    g_menu_append_section (examples, NULL, G_MENU_MODEL (part));
+    g_object_unref (part);
+    part = g_menu_new ();
+    ADD (part, "Product launch (profit at risk)", "win.open-example::launch.tm", NULL);
+    ADD (part, "Sales forecast (exponential smoothing)", "win.open-example::sales.tm", NULL);
+    ADD (part, "Project schedule (PERT)", "win.open-example::project.tm", NULL);
+    ADD (part, "Retirement savings (random walk)", "win.open-example::retirement.tm", NULL);
+    g_menu_append_section (examples, NULL, G_MENU_MODEL (part));
+    g_object_unref (part);
+    part = g_menu_new ();
+    ADD (part, "Forecasting tournament (Brier scores, Bayes)", "win.open-example::judgment.tm", NULL);
+    g_menu_append_section (examples, NULL, G_MENU_MODEL (part));
+    g_object_unref (part);
+  }
   g_menu_append_submenu (section, "Open _Example", G_MENU_MODEL (examples));
   g_object_unref (examples);
   g_menu_append_section (m, NULL, G_MENU_MODEL (section));

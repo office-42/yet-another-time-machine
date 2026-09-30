@@ -171,7 +171,110 @@ and keeping score.
   a column of your forecasts and a column of what happened, and score
   them.
 
-## 6. Reading the results
+## 6. Weather
+
+Weather forecasters use two ideas that work far beyond weather.
+
+- **Persistence as a chain.** Whether it rains tomorrow depends mostly on
+  whether it rains today. A *Markov chain* says exactly that and no more:
+  a table of the chance of each state tomorrow given each state today.
+  - `MARKOV.ESTIMATE(from, to, history, [prior])` counts it from a column
+    of past states; the prior adds pseudo-counts so that a transition
+    never seen is not treated as impossible.
+  - `RAND.MARKOV(today, states, matrix)` draws tomorrow.
+  - `MARKOV.PROB(from, to, states, matrix, days)` is the exact chance
+    that many days on.
+  - `MARKOV.STEADY` is the long-run share, which the forecast decays
+    towards: the forecast approaches *climatology*.
+
+  The same chain serves for customers moving between plans, machines
+  between working and broken, or economies between growth and recession.
+- **Anomalies revert.** Temperature is the seasonal normal plus an
+  anomaly, and a warm spell fades day by day.
+  `RAND.AR1(yesterday, 0, phi, sigma)` carries a fraction *phi* of
+  yesterday's anomaly over and adds a fresh shock.
+  `FORECAST.AR1(steps, history)` fits *phi* and gives the fading
+  forecast; `FORECAST.AR1.CONFINT` gives its widening interval.
+- **Skill, not score.** A 20% chance of rain in a dry climate is easy to
+  get right. `BRIER.SKILL(probabilities, outcomes)` compares your Brier
+  score with always forecasting the base rate (climatology): 0 is no
+  better, 1 is perfect, and negative is worse than knowing nothing.
+
+## 7. Sport
+
+- **Goals are Poisson.** In football, hockey and other low-scoring games,
+  goals arrive roughly at random at a rate that depends on the two
+  sides. With expected goals of 1.5 against 1.1,
+  `POISSON.MATCH(1.5, 1.1, "home")` gives the home win's chance, 46%.
+  `POISSON.SCORE` gives exact scores. The optional *rho* (around −0.05 to
+  −0.1) is Dixon and Coles' correction for the low scores Poisson gets
+  slightly wrong.
+- **Expected goals from results.**
+  `MATCH.XG(home, away, home_teams, away_teams, home_goals, away_goals)`
+  multiplies the league's average home score by the home side's
+  attacking strength and the away side's defensive weakness, each a ratio
+  to the average and shrunk towards it by one game's worth of average
+  results. `side` 2 gives the away side's figure. Use more than a handful
+  of games: the football example adds last season's.
+- **Seasons, not matches.** Simulate every remaining match with
+  `RAND.POISSON` goals, add up the points, and `SIM.MEAN` of "is top" is
+  a title chance. That is how the bookmakers' outright odds are made.
+- **Elo.** `ELO.EXPECT(rating, opponent, [home_advantage])` gives the
+  expected score. `ELO.UPDATE(rating, expected, actual, k)` moves the
+  rating by *k* times the surprise. Chess, football and tennis ratings
+  all work this way.
+
+## 8. Markets
+
+- **Random walks.** Prices are modelled as geometric Brownian motion:
+  log returns are normal, with a drift and a volatility.
+  `DRIFT(prices, 52)` and `VOLATILITY(prices, 52)` estimate both from
+  weekly prices. Then `GBM.PROB`, `GBM.PERCENTILE` and `RAND.GBM` answer
+  "where in a year?".
+- **The drift is barely known.** Two years of data pin the volatility down
+  well but the drift only to about ±20% a year: the standard error of a
+  drift is the volatility divided by the square root of the years. Treat
+  the drift as a guess, or make it an uncertain input of its own.
+- **Fat tails.** Real returns have more extreme weeks than a normal
+  distribution allows. Resampling the history's own returns
+  (`RAND.BOOTSTRAP`) keeps them, as does `RAND.STUDENT`.
+- **Risk.** Value at risk is today's price minus `SIM.PERCENTILE(end, 5%)`.
+  `SIM.TAILMEAN` gives the expected shortfall beyond it. `DRAWDOWN(path)`
+  is the worst fall along the way, and its distribution across the
+  futures is often what an investor actually feels.
+- **The market's own forecast.** `BLACKSCHOLES(price, strike, rate,
+  volatility, years)` is what an option costs if the volatility is as
+  given. Read the other way round, an option's price reveals the
+  volatility the market expects.
+
+## 9. Growth, benchmarks and trends
+
+- **Benchmarks first.** A method earns its keep only if it beats the
+  simple ones:
+  - carrying the last value forward;
+  - the value a season ago (`FORECAST.SNAIVE`);
+  - the last value plus the average step so far (`FORECAST.DRIFT`).
+
+  Forecasting competitions have shown, again and again, how often they
+  win.
+- **Damped trend** (`FORECAST.DAMPED`). Holt's trend, fading by *phi* a
+  period so that the forecast levels off instead of running on for ever.
+  It was the most reliable automatic method in the M-competitions.
+- **S-curves.** Anything that spreads through a population (a product, a
+  technology, an epidemic) grows exponentially at first and then meets a
+  ceiling:
+  - `LOGISTIC(t, capacity, rate, midpoint)` is symmetric;
+  - `GOMPERTZ` is lopsided;
+  - `BASS(t, p, q, market)` separates adopters who come on their own
+    (*p*, about 0.03) from those who follow others (*q*, about 0.4).
+
+  Fitted before the midpoint, the ceiling is barely known, so make it an
+  uncertain input.
+- **A lopsided risk** (`RAND.SPLITNORMAL(mode, sd_below, sd_above)`) is a
+  bell with a different spread on each side. The Bank of England draws its
+  inflation fan charts this way.
+
+## 10. Reading the results
 
 - **Median and the 90% range** (P5 to P95) are the honest summary of a
   forecast. The mean is pulled by the tails.
