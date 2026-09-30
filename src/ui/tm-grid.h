@@ -38,4 +38,15 @@ GtkAdjustment *tm_grid_get_vadjustment (TmGrid *grid);
 /* The sheet has changed: draw it again. */
 void     tm_grid_refresh (TmGrid *grid);
 
+/* An edit in progress, drawn in the cell as it is typed in the formula
+ * bar: the text, and the caret's position in characters.  NULL text ends
+ * it. */
+void     tm_grid_show_edit (TmGrid *grid, TmRef cell, const char *text, int caret);
+
+/* Point mode: while a formula is being typed at a place a reference could
+ * go, clicking or dragging over cells does not move the selection but
+ * emits "point" with the range, for the formula to take. */
+void     tm_grid_set_pointing (TmGrid *grid, gboolean pointing);
+void     tm_grid_show_point   (TmGrid *grid, const TmRange *range);
+
 G_END_DECLS

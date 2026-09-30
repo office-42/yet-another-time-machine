@@ -8,7 +8,10 @@
   new value. Unlike Excel, typing does not re-roll the draws: each
   uncertain cell keeps its draw until you press F9. The **%**, **1,000**,
   **.0+** and **.0−** buttons format the selection as a percentage, with
-  thousands separated, or with more or fewer decimals.
+  thousands separated, or with more or fewer decimals. The sampling menu
+  chooses between plain **Monte Carlo** and **Latin hypercube**
+  sampling, which covers each input's range evenly and so settles with
+  fewer futures.
 - **Formula bar.** The name box on the left shows the selected cell. Type
   a cell or range there (`B14`, `B11:AA11`) to go to it. The long box
   shows what the cell holds, and you can edit it there.
@@ -20,8 +23,9 @@
     marked at P5, P50 and P95, with the mean as a triangle and any futures
     below zero drawn in red;
   - a row or column selected: a fan chart of the 90% and 50% bands and
-    the median, with cells that are plain values (the history) drawn as a
-    line leading into it.
+    the median, a dozen single futures drawn faintly through them, and
+    cells that are plain values (the history) drawn as a line leading
+    into it.
 
   Under the chart are the mean, standard deviation, standard error of the
   mean, minimum, maximum, P5, P25, median, P75, P95 and the chance the
@@ -55,6 +59,12 @@
 | F9 | draw again |
 | F1 | the list of functions |
 | Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Shift+S, Ctrl+Q | new, open, save, save as, quit |
+
+What you type appears in the cell as well as in the formula bar. While
+you type a formula, wherever a reference could go (after `=`, `(`, `,` or
+an operator), clicking a cell or dragging over a range puts its address
+into the formula, marked on the grid with a dashed border. Clicking again
+replaces it; typing anything else keeps it.
 
 A formula starts with `=`. A value starting with `'` is kept as text. You
 can type `12%` for 0.12, and you can use `12%` inside formulas too.
@@ -114,6 +124,7 @@ tab-separated:
 timemachine 1
 iterations	10000
 seed	1
+sampling	latin
 width	A	230
 format	B4	#,##0
 cell	A4	Market size (units a year)
@@ -144,6 +155,7 @@ commands from standard input:
 | `histogram B1 [bins]` | the futures drawn as a histogram in text |
 | `fan B1:M1` | P5, P25, P50, P75 and P95 cell by cell |
 | `iterations N`, `seed N` | simulation settings |
+| `sampling latin`, `sampling random` | Latin hypercube or plain Monte Carlo |
 | `format A1:B9 0.0%` | set a number format; no code means General |
 | `undo`, `redo` | undo and redo |
 | `redraw` | Draw again: the next draw from every random cell |

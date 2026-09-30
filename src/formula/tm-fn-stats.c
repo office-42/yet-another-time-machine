@@ -425,6 +425,156 @@ fn_expon_dist (TmEvalContext *ctx, TmArg *args, int n)
   return tm_value_number (cumulative ? 1 - exp (-lambda * x) : lambda * exp (-lambda * x));
 }
 
+static TmValue
+fn_beta_dist (TmEvalContext *ctx, TmArg *args, int n)
+{
+  TmValue err;
+  double x, a, b, lo, hi;
+  gboolean cumulative;
+
+  ARG_NUM (0, x);
+  ARG_NUM (1, a);
+  ARG_NUM (2, b);
+  ARG_BOOL (3, cumulative);
+  OPT_NUM (4, lo, 0);
+  OPT_NUM (5, hi, 1);
+  if (a <= 0 || b <= 0 || hi <= lo || x < lo || x > hi)
+    return tm_value_error (TM_ERR_NUM);
+  x = (x - lo) / (hi - lo);
+  if (cumulative)
+    return tm_value_number (tm_beta_inc (a, b, x));
+  if (x <= 0 || x >= 1)
+    return tm_value_number (0);
+  return tm_value_number (exp ((a - 1) * log (x) + (b - 1) * log1p (-x)
+                               + lgamma (a + b) - lgamma (a) - lgamma (b)) / (hi - lo));
+}
+
+static TmValue
+fn_beta_inv (TmEvalContext *ctx, TmArg *args, int n)
+{
+  TmValue err;
+  double p, a, b, lo, hi;
+
+  ARG_NUM (0, p);
+  ARG_NUM (1, a);
+  ARG_NUM (2, b);
+  OPT_NUM (3, lo, 0);
+  OPT_NUM (4, hi, 1);
+  if (p <= 0 || p > 1 || a <= 0 || b <= 0 || hi <= lo)
+    return tm_value_error (TM_ERR_NUM);
+  return tm_value_number (lo + (hi - lo) * tm_beta_inv (p, a, b));
+}
+
+static TmValue
+fn_gamma_dist (TmEvalContext *ctx, TmArg *args, int n)
+{
+  TmValue err;
+  double x, a, scale;
+  gboolean cumulative;
+
+  ARG_NUM (0, x);
+  ARG_NUM (1, a);
+  ARG_NUM (2, scale);
+  ARG_BOOL (3, cumulative);
+  if (x < 0 || a <= 0 || scale <= 0)
+    return tm_value_error (TM_ERR_NUM);
+  if (cumulative)
+    return tm_value_number (tm_gamma_p (a, x / scale));
+  if (x == 0)
+    return tm_value_number (a == 1 ? 1 / scale : 0);
+  return tm_value_number (exp ((a - 1) * log (x / scale) - x / scale - lgamma (a)) / scale);
+}
+
+static TmValue
+fn_gamma_inv (TmEvalContext *ctx, TmArg *args, int n)
+{
+  TmValue err;
+  double p, a, scale;
+
+  ARG_NUM (0, p);
+  ARG_NUM (1, a);
+  ARG_NUM (2, scale);
+  if (p < 0 || p >= 1 || a <= 0 || scale <= 0)
+    return tm_value_error (TM_ERR_NUM);
+  return tm_value_number (scale * tm_gamma_inv (p, a));
+}
+
+static TmValue
+fn_t_dist (TmEvalContext *ctx, TmArg *args, int n)
+{
+  TmValue err;
+  double t, df;
+  gboolean cumulative;
+
+  ARG_NUM (0, t);
+  ARG_NUM (1, df);
+  ARG_BOOL (2, cumulative);
+  if (df < 1)
+    return tm_value_error (TM_ERR_NUM);
+  if (cumulative)
+    return tm_value_number (tm_t_cdf (t, df));
+  return tm_value_number (exp (lgamma ((df + 1) / 2) - lgamma (df / 2) - 0.5 * log (df * G_PI)
+                               - (df + 1) / 2 * log1p (t * t / df)));
+}
+
+static TmValue
+fn_t_inv (TmEvalContext *ctx, TmArg *args, int n)
+{
+  TmValue err;
+  double p, df;
+
+  ARG_NUM (0, p);
+  ARG_NUM (1, df);
+  if (p <= 0 || p >= 1 || df < 1)
+    return tm_value_error (TM_ERR_NUM);
+  return tm_value_number (tm_t_inv (p, df));
+}
+
+static TmValue
+fn_t_inv_2t (TmEvalContext *ctx, TmArg *args, int n)
+{
+  TmValue err;
+  double p, df;
+
+  ARG_NUM (0, p);
+  ARG_NUM (1, df);
+  if (p <= 0 || p > 1 || df < 1)
+    return tm_value_error (TM_ERR_NUM);
+  return tm_value_number (tm_t_inv (1 - p / 2, df));
+}
+
+static TmValue
+fn_lognorm_dist (TmEvalContext *ctx, TmArg *args, int n)
+{
+  TmValue err;
+  double x, mu, sigma;
+  gboolean cumulative;
+
+  ARG_NUM (0, x);
+  ARG_NUM (1, mu);
+  ARG_NUM (2, sigma);
+  ARG_BOOL (3, cumulative);
+  if (x <= 0 || sigma <= 0)
+    return tm_value_error (TM_ERR_NUM);
+  if (cumulative)
+    return tm_value_number (tm_norm_cdf ((log (x) - mu) / sigma));
+  return tm_value_number (exp (-0.5 * pow ((log (x) - mu) / sigma, 2)) / (x * sigma * sqrt (2 * G_PI)));
+}
+
+static TmValue
+fn_lognorm_inv (TmEvalContext *ctx, TmArg *args, int n)
+{
+  TmValue err;
+  double p, mu, sigma;
+
+  ARG_NUM (0, p);
+  ARG_NUM (1, mu);
+  ARG_NUM (2, sigma);
+  if (p <= 0 || p >= 1 || sigma <= 0)
+    return tm_value_error (TM_ERR_NUM);
+  return tm_value_number (exp (mu + sigma * tm_norm_inv (p)));
+}
+
 const TmFunction tm_fn_stats[] = {
   FN ("AVERAGE", 1, -1, fn_average, 0, S, "AVERAGE(number, ...)", "The arithmetic mean."),
   FN ("MIN", 1, -1, fn_min, 0, S, "MIN(number, ...)", "The smallest number."),
@@ -455,5 +605,14 @@ const TmFunction tm_fn_stats[] = {
   FN ("POISSON.DIST", 3, 3, fn_poisson_dist, 0, D, "POISSON.DIST(x, mean, cumulative)", "The chance of x events when mean are expected."),
   FN ("BINOM.DIST", 4, 4, fn_binom_dist, 0, D, "BINOM.DIST(k, trials, p, cumulative)", "The chance of k successes in so many trials."),
   FN ("EXPON.DIST", 3, 3, fn_expon_dist, 0, D, "EXPON.DIST(x, rate, cumulative)", "The exponential distribution."),
+  FN ("BETA.DIST", 4, 6, fn_beta_dist, 0, D, "BETA.DIST(x, alpha, beta, cumulative, [A], [B])", "The beta distribution."),
+  FN ("BETA.INV", 3, 5, fn_beta_inv, 0, D, "BETA.INV(p, alpha, beta, [A], [B])", "The beta distribution's quantile."),
+  FN ("GAMMA.DIST", 4, 4, fn_gamma_dist, 0, D, "GAMMA.DIST(x, shape, scale, cumulative)", "The gamma distribution."),
+  FN ("GAMMA.INV", 3, 3, fn_gamma_inv, 0, D, "GAMMA.INV(p, shape, scale)", "The gamma distribution's quantile."),
+  FN ("T.DIST", 3, 3, fn_t_dist, 0, D, "T.DIST(t, df, cumulative)", "Student's t distribution."),
+  FN ("T.INV", 2, 2, fn_t_inv, 0, D, "T.INV(p, df)", "Student's t quantile."),
+  FN ("T.INV.2T", 2, 2, fn_t_inv_2t, 0, D, "T.INV.2T(p, df)", "The t value with probability p outside plus or minus it."),
+  FN ("LOGNORM.DIST", 4, 4, fn_lognorm_dist, 0, D, "LOGNORM.DIST(x, mu, sigma, cumulative)", "The lognormal distribution, by its log's mean and sd."),
+  FN ("LOGNORM.INV", 3, 3, fn_lognorm_inv, 0, D, "LOGNORM.INV(p, mu, sigma)", "The lognormal distribution's quantile."),
 };
 const int tm_fn_stats_count = G_N_ELEMENTS (tm_fn_stats);

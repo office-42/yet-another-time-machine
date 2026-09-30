@@ -54,6 +54,16 @@ the square root of the number of futures. Four times as many halves it.
 known to about ±0.1%, but the extreme tails need many more. The seed
 makes a run repeatable: the same seed gives the same futures.
 
+**Latin hypercube sampling** (the toolbar's sampling menu) gets more
+from each future. It splits every input's range into as many equally
+likely slices as there are futures and draws from each slice exactly
+once, pairing the slices of different inputs at random. The futures then
+cover every input evenly instead of by luck. With 1,000 futures, a
+normal input's simulated mean lands within a few hundredths of the truth,
+where plain Monte Carlo would be off by about half a unit. `SIM.SE`
+assumes plain Monte Carlo, so under Latin hypercube it overstates the
+error. @RISK samples this way by default.
+
 **Traps.**
 - *The flaw of averages.* A plan built from average inputs is not the
   average outcome whenever the model has a maximum, a minimum, a capacity

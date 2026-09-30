@@ -29,6 +29,32 @@
 #define LAZY(name, lo, hi, impl, flags, cat, syntax, help) \
   { name, lo, hi, NULL, impl, flags, cat, syntax, help }
 
+/* The draws random functions are built from: a uniform, and a standard
+ * normal.  Under Latin hypercube sampling both come from the cell's
+ * stratified uniform, the normal through its inverse distribution
+ * function, so that the strata carry through. */
+static inline gboolean
+stratified (TmEvalContext *ctx, double *u)
+{
+  return ctx->stratified != NULL && ctx->stratified (ctx->data, u);
+}
+
+static inline double
+draw_uniform (TmEvalContext *ctx)
+{
+  double u;
+
+  return stratified (ctx, &u) ? u : tm_rng_uniform (ctx->rng);
+}
+
+static inline double
+draw_normal (TmEvalContext *ctx)
+{
+  double u;
+
+  return stratified (ctx, &u) ? tm_norm_inv (u) : tm_rng_normal (ctx->rng);
+}
+
 static inline TmValue
 num_or_error (double d)
 {

@@ -18,11 +18,13 @@ G_BEGIN_DECLS
 
 typedef struct _TmSim TmSim;
 
-TmSim   *tm_sim_new        (int iterations, guint64 seed);
+TmSim   *tm_sim_new        (int iterations, guint64 seed, gboolean latin);
 void     tm_sim_free       (TmSim *sim);
 
 int      tm_sim_iterations (const TmSim *sim);
 guint64  tm_sim_seed       (const TmSim *sim);
+/* Whether the futures were drawn by Latin hypercube sampling. */
+gboolean tm_sim_latin      (const TmSim *sim);
 double   tm_sim_seconds    (const TmSim *sim);
 void     tm_sim_set_seconds (TmSim *sim, double seconds);
 /* Set when the sheet has changed since the simulation ran. */

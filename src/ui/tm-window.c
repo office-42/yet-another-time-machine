@@ -67,10 +67,13 @@ struct _TmWindow {
   GtkWidget *stop_button;
   GtkWidget *iter_spin;
   GtkWidget *seed_spin;
+  GtkWidget *sampling_drop;
 
   gboolean editing;         /* the formula bar holds an edit not yet made */
   gboolean setting_text;    /* the formula bar is being filled, not typed in */
   TmRef edit_ref;           /* the cell the edit is for */
+  int point_start;          /* the reference pointing last put in the */
+  int point_end;            /* formula, in characters; -1 if none */
 
   gboolean simulating;
   gboolean stop_requested;
@@ -309,8 +312,10 @@ update_panel (TmWindow *self)
     gtk_label_set_text (GTK_LABEL (self->panel_subtitle), "Not simulated yet");
   else
     {
-      char *sub = g_strdup_printf ("%d futures, seed %" G_GUINT64_FORMAT "%s",
-                                   tm_sim_iterations (sim), tm_sim_seed (sim),
+      char *sub = g_strdup_printf ("%d futures%s, seed %" G_GUINT64_FORMAT "%s",
+                                   tm_sim_iterations (sim),
+                                   tm_sim_latin (sim) ? " (Latin hypercube)" : "",
+                                   tm_sim_seed (sim),
                                    tm_sim_stale (sim) ? "  ·  out of date: press F5" : "");
       gtk_label_set_text (GTK_LABEL (self->panel_subtitle), sub);
       g_free (sub);
@@ -370,6 +375,75 @@ update_panel (TmWindow *self)
 
 /* ---- The formula bar -------------------------------------------------- */
 
+/* Whether a reference could go at the caret: the edit is a formula, and
+ * the caret follows an operator, a bracket, a comma -- or the reference
+ * pointing put there last, which another click replaces. */
+static gboolean
+can_point (TmWindow *self)
+{
+  const char *text = gtk_editable_get_text (GTK_EDITABLE (self->formula_entry));
+  int caret = gtk_editable_get_position (GTK_EDITABLE (self->formula_entry));
+  const char *at;
+  gunichar before;
+
+  if (!self->editing || text[0] != '=')
+    return FALSE;
+  if (self->point_start >= 0 && caret == self->point_end)
+    return TRUE;
+  if (caret <= 0)
+    return FALSE;
+  at = g_utf8_offset_to_pointer (text, caret);
+  before = g_utf8_get_char (g_utf8_prev_char (at));
+  return strchr ("=(,;+-*/^&<>:", (int) before) != NULL && before != 0;
+}
+
+static void
+mirror_edit (TmWindow *self)
+{
+  if (!self->editing)
+    {
+      tm_grid_show_edit (TM_GRID (self->grid), self->edit_ref, NULL, 0);
+      tm_grid_set_pointing (TM_GRID (self->grid), FALSE);
+      return;
+    }
+  tm_grid_show_edit (TM_GRID (self->grid), self->edit_ref,
+                     gtk_editable_get_text (GTK_EDITABLE (self->formula_entry)),
+                     gtk_editable_get_position (GTK_EDITABLE (self->formula_entry)));
+  tm_grid_set_pointing (TM_GRID (self->grid), can_point (self));
+}
+
+/* A click or drag on the grid while pointing: the range goes into the
+ * formula at the caret, replacing the one the last click put there. */
+static void
+on_grid_point (TmGrid *grid, const TmRange *range, TmWindow *self)
+{
+  GtkEditable *e = GTK_EDITABLE (self->formula_entry);
+  int caret = gtk_editable_get_position (e);
+  char *name = tm_range_name (range);
+  int start;
+
+  /* Both edits are ours, not typing: the changed handler, which would
+   * forget the pointed reference, is kept out of them. */
+  self->setting_text = TRUE;
+  if (self->point_start >= 0 && caret == self->point_end)
+    {
+      start = self->point_start;
+      gtk_editable_delete_text (e, self->point_start, self->point_end);
+    }
+  else
+    start = caret;
+  caret = start;
+  gtk_editable_insert_text (e, name, -1, &caret);
+  self->setting_text = FALSE;
+  self->point_start = start;
+  self->point_end = caret;
+  gtk_entry_grab_focus_without_selecting (GTK_ENTRY (self->formula_entry));
+  gtk_editable_set_position (e, caret);
+  tm_grid_show_point (grid, range);
+  mirror_edit (self);
+  g_free (name);
+}
+
 static void
 update_formula_bar (TmWindow *self)
 {
@@ -388,6 +462,8 @@ update_formula_bar (TmWindow *self)
   gtk_editable_set_text (GTK_EDITABLE (self->formula_entry), input != NULL ? input : "");
   self->setting_text = FALSE;
   self->editing = FALSE;
+  self->point_start = self->point_end = -1;
+  mirror_edit (self);
 }
 
 static void
@@ -398,6 +474,8 @@ commit_edit (TmWindow *self)
   if (!self->editing)
     return;
   self->editing = FALSE;
+  self->point_start = self->point_end = -1;
+  mirror_edit (self);
   text = gtk_editable_get_text (GTK_EDITABLE (self->formula_entry));
   if (g_strcmp0 (text, tm_sheet_get_input (self->sheet, self->edit_ref.row, self->edit_ref.col)) == 0
       || (*text == '\0' && tm_sheet_get_input (self->sheet, self->edit_ref.row, self->edit_ref.col) == NULL))
@@ -434,17 +512,33 @@ on_grid_edit (TmGrid *grid, const char *text, TmWindow *self)
       self->setting_text = FALSE;
     }
   self->editing = TRUE;
+  self->point_start = self->point_end = -1;
   gtk_entry_grab_focus_without_selecting (GTK_ENTRY (self->formula_entry));
   gtk_editable_set_position (GTK_EDITABLE (self->formula_entry), -1);
+  mirror_edit (self);
 }
 
 static void
 on_formula_changed (GtkEditable *editable, TmWindow *self)
 {
-  if (self->setting_text || self->editing)
+  if (self->setting_text)
     return;
-  self->editing = TRUE;
-  self->edit_ref = tm_grid_get_cursor (TM_GRID (self->grid));
+  if (!self->editing)
+    {
+      self->editing = TRUE;
+      self->edit_ref = tm_grid_get_cursor (TM_GRID (self->grid));
+    }
+  /* Typing over a pointed reference makes it the user's own. */
+  self->point_start = self->point_end = -1;
+  tm_grid_show_point (TM_GRID (self->grid), NULL);
+  mirror_edit (self);
+}
+
+static void
+on_caret_moved (GObject *object, GParamSpec *pspec, TmWindow *self)
+{
+  if (self->editing)
+    mirror_edit (self);
 }
 
 static void
@@ -865,6 +959,15 @@ on_iterations_changed (GtkSpinButton *spin, TmWindow *self)
 }
 
 static void
+on_sampling_changed (GObject *object, GParamSpec *pspec, TmWindow *self)
+{
+  guint i = gtk_drop_down_get_selected (GTK_DROP_DOWN (self->sampling_drop));
+
+  tm_sheet_set_sampling (self->sheet, i == 1 ? TM_SAMPLING_LATIN_HYPERCUBE : TM_SAMPLING_MONTE_CARLO);
+  update_title (self);
+}
+
+static void
 sync_settings (TmWindow *self)
 {
   g_signal_handlers_block_by_func (self->iter_spin, on_iterations_changed, self);
@@ -873,6 +976,10 @@ sync_settings (TmWindow *self)
   gtk_spin_button_set_value (GTK_SPIN_BUTTON (self->seed_spin), (double) tm_sheet_seed (self->sheet));
   g_signal_handlers_unblock_by_func (self->iter_spin, on_iterations_changed, self);
   g_signal_handlers_unblock_by_func (self->seed_spin, on_seed_changed, self);
+  g_signal_handlers_block_by_func (self->sampling_drop, on_sampling_changed, self);
+  gtk_drop_down_set_selected (GTK_DROP_DOWN (self->sampling_drop),
+                              tm_sheet_sampling (self->sheet) == TM_SAMPLING_LATIN_HYPERCUBE ? 1 : 0);
+  g_signal_handlers_unblock_by_func (self->sampling_drop, on_sampling_changed, self);
 }
 
 gboolean
@@ -1487,6 +1594,7 @@ tm_window_init (TmWindow *self)
   GMenuModel *menu;
 
   self->sheet = tm_sheet_new ();
+  self->point_start = self->point_end = -1;
   self->drivers = g_array_new (FALSE, FALSE, sizeof (Driver));
   g_action_map_add_action_entries (G_ACTION_MAP (self), WIN_ACTIONS,
                                    G_N_ELEMENTS (WIN_ACTIONS), self);
@@ -1520,6 +1628,16 @@ tm_window_init (TmWindow *self)
   gtk_widget_set_tooltip_text (self->seed_spin, "The same seed gives the same futures");
   g_signal_connect (self->seed_spin, "value-changed", G_CALLBACK (on_seed_changed), self);
   gtk_box_append (GTK_BOX (toolbar), labelled ("Seed", self->seed_spin));
+  {
+    static const char *const kinds[] = { "Monte Carlo", "Latin hypercube", NULL };
+
+    self->sampling_drop = gtk_drop_down_new_from_strings (kinds);
+    gtk_widget_set_tooltip_text (self->sampling_drop,
+                                 "Latin hypercube sampling covers every input's range evenly, "
+                                 "so results settle with fewer futures");
+    g_signal_connect (self->sampling_drop, "notify::selected", G_CALLBACK (on_sampling_changed), self);
+    gtk_box_append (GTK_BOX (toolbar), self->sampling_drop);
+  }
   {
     GtkWidget *recalc = gtk_button_new_with_label ("Draw again");
     gtk_widget_set_tooltip_text (recalc, "Every uncertain cell draws a new value (F9)");
@@ -1564,6 +1682,7 @@ tm_window_init (TmWindow *self)
   gtk_widget_add_css_class (self->formula_entry, "formula");
   g_signal_connect (self->formula_entry, "activate", G_CALLBACK (on_formula_activate), self);
   g_signal_connect (self->formula_entry, "changed", G_CALLBACK (on_formula_changed), self);
+  g_signal_connect (self->formula_entry, "notify::cursor-position", G_CALLBACK (on_caret_moved), self);
   {
     GtkEventController *key = gtk_event_controller_key_new ();
     gtk_event_controller_set_propagation_phase (key, GTK_PHASE_CAPTURE);
@@ -1589,6 +1708,7 @@ tm_window_init (TmWindow *self)
   gtk_grid_attach (GTK_GRID (grid_area), hscroll, 0, 1, 1, 1);
   g_signal_connect (self->grid, "selection-changed", G_CALLBACK (on_selection_changed), self);
   g_signal_connect (self->grid, "edit", G_CALLBACK (on_grid_edit), self);
+  g_signal_connect (self->grid, "point", G_CALLBACK (on_grid_point), self);
   gtk_paned_set_start_child (GTK_PANED (paned), grid_area);
 
   {

@@ -79,6 +79,18 @@ A formula that draws more than once, such as
 `=RAND.NORMAL(0,1)+RAND.NORMAL(0,1)`, takes its draws one after another
 from its cell's stream.
 
+Under Latin hypercube sampling each draw in a cell's formula (its *slot*)
+gets a shuffle of the numbers 0 to N−1, seeded from the seed, the cell
+and the slot. In future i, the draw takes the stratified uniform
+(perm[i] + U)/N, with U from the cell's stream, and passes it through
+the distribution's inverse distribution function. So every distribution
+has one: in closed form where there is one (normal, lognormal,
+triangular, exponential, metalog), and otherwise by Newton's method kept
+inside a bracket by bisection, on the incomplete beta and gamma functions
+(PERT, beta, gamma, Student's t) or by stepping along the distribution
+function (Poisson, binomial). Under plain Monte Carlo the faster
+rejection samplers are used instead.
+
 ## Undo
 
 Every change to a cell's contents or format goes through one function,

@@ -116,6 +116,9 @@ load_tm (TmSheet *sheet, const char *contents, const char *path, GError **error)
         tm_sheet_set_iterations (sheet, atoi (f[1]));
       else if (strcmp (f[0], "seed") == 0 && nf >= 2)
         tm_sheet_set_seed (sheet, g_ascii_strtoull (f[1], NULL, 10));
+      else if (strcmp (f[0], "sampling") == 0 && nf >= 2)
+        tm_sheet_set_sampling (sheet, strcmp (f[1], "latin") == 0
+                                      ? TM_SAMPLING_LATIN_HYPERCUBE : TM_SAMPLING_MONTE_CARLO);
       /* Anything else is from a later version, and skipped. */
       g_strfreev (f);
     }
@@ -154,6 +157,8 @@ save_tm (TmSheet *sheet)
 
   g_string_append_printf (out, "iterations\t%d\n", tm_sheet_iterations (sheet));
   g_string_append_printf (out, "seed\t%" G_GUINT64_FORMAT "\n", tm_sheet_seed (sheet));
+  if (tm_sheet_sampling (sheet) == TM_SAMPLING_LATIN_HYPERCUBE)
+    g_string_append (out, "sampling\tlatin\n");
   for (int c = 0; c < TM_MAX_COLS; c++)
     if (tm_sheet_col_width (sheet, c) != TM_DEFAULT_COL_WIDTH)
       {

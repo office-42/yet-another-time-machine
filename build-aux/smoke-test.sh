@@ -180,6 +180,52 @@ near B9 30 0.3
 near B10 25 0.15
 near C1 15 0.3
 
+# Latin hypercube sampling covers each input's strata exactly once, so
+# with only 1,000 futures its means and percentiles are nearly exact --
+# far inside what plain Monte Carlo could promise (its standard error
+# here would be 0.47 on the first).
+run 'latin hypercube' 'sampling latin
+iterations 1000
+A1 = =RAND.NORMAL(100,15)
+A2 = =RAND.PERT(10,20,60)
+A3 = =RAND.GAMMA(3,2)
+A4 = =RAND.POISSON(4)
+B1 = =SIM.MEAN(A1)
+B2 = =SIM.PERCENTILE(A1,0.95)
+B3 = =SIM.MEAN(A2)
+B4 = =SIM.MEAN(A3)
+B5 = =SIM.MEAN(A4)
+simulate
+B1
+B2
+B3
+B4
+B5
+'
+want "Latin hypercube"
+near B1 100 0.05
+near B2 124.67 0.2
+near B3 25 0.05
+near B4 6 0.02
+near B5 4 0.01
+
+run 'inverse distributions' 'A1 = =T.INV(0.975,3)
+A1
+A2 = =GAMMA.INV(0.9,3,2)
+A2
+A3 = =BETA.DIST(BETA.INV(0.3,2,5),2,5,TRUE)
+A3
+A4 = =T.INV.2T(0.05,1)
+A4
+A5 = =BETA.INV(0.999,0.5,0.5)
+A5
+'
+near A1 3.182446305 1e-8
+near A2 10.644640676 1e-7
+near A3 0.3 1e-10
+near A4 12.706204736 1e-7
+near A5 0.9999975326 1e-9
+
 # The same seed gives the same futures.
 run 'seeds' 'A1 = =RAND.NORMAL(0,1)
 B1 = =SIM.SAMPLE(A1,7)

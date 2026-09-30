@@ -20,6 +20,7 @@ typedef struct {
 struct _TmSim {
   int         iterations;
   guint64     seed;
+  gboolean    latin;
   double      seconds;
   gboolean    stale;
   GHashTable *series;    /* key -> Series */
@@ -37,12 +38,13 @@ series_free (gpointer p)
 }
 
 TmSim *
-tm_sim_new (int iterations, guint64 seed)
+tm_sim_new (int iterations, guint64 seed, gboolean latin)
 {
   TmSim *sim = g_new0 (TmSim, 1);
 
   sim->iterations = iterations;
   sim->seed = seed;
+  sim->latin = latin;
   sim->series = g_hash_table_new_full (g_int64_hash, g_int64_equal, g_free, series_free);
   return sim;
 }
@@ -58,6 +60,7 @@ tm_sim_free (TmSim *sim)
 
 int      tm_sim_iterations (const TmSim *sim) { return sim->iterations; }
 guint64  tm_sim_seed (const TmSim *sim) { return sim->seed; }
+gboolean tm_sim_latin (const TmSim *sim) { return sim->latin; }
 double   tm_sim_seconds (const TmSim *sim) { return sim->seconds; }
 void     tm_sim_set_seconds (TmSim *sim, double seconds) { sim->seconds = seconds; }
 gboolean tm_sim_stale (const TmSim *sim) { return sim->stale; }

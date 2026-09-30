@@ -29,6 +29,7 @@
  *     fan B1:M1                percentile bands along a row or column
  *     iterations 5000          simulation settings
  *     seed 42
+ *     sampling latin           ... or sampling random, plain Monte Carlo
  *     draws 7                  seed the ordinary recalculation's draws
  *     recalc                   work every formula out again
  *     redraw                   ... with the next draw from every random cell
@@ -283,8 +284,9 @@ run_line (TmSheet *sheet, char *line)
         tm_sheet_set_iterations (sheet, atoi (arg));
       tm_sheet_simulate (sheet, progress, NULL);
       sim = tm_sheet_get_sim (sheet);
-      printf ("simulated %d iterations, seed %" G_GUINT64_FORMAT ", %d cells kept\n",
-              tm_sim_iterations (sim), tm_sim_seed (sim), tm_sim_n_tracked (sim));
+      printf ("simulated %d iterations, seed %" G_GUINT64_FORMAT ", %d cells kept%s\n",
+              tm_sim_iterations (sim), tm_sim_seed (sim), tm_sim_n_tracked (sim),
+              tm_sim_latin (sim) ? ", Latin hypercube" : "");
       fprintf (stderr, "(%.3f s)\n", tm_sim_seconds (sim));
     }
   else if (arg == NULL)
@@ -313,6 +315,9 @@ run_line (TmSheet *sheet, char *line)
         return FALSE;
       tm_sheet_format_range (sheet, &range, code != NULL ? g_strstrip (code) : NULL);
     }
+  else if (strcmp (line, "sampling") == 0)
+    tm_sheet_set_sampling (sheet, g_str_has_prefix (arg, "latin")
+                                  ? TM_SAMPLING_LATIN_HYPERCUBE : TM_SAMPLING_MONTE_CARLO);
   else if (strcmp (line, "iterations") == 0)
     tm_sheet_set_iterations (sheet, atoi (arg));
   else if (strcmp (line, "seed") == 0)

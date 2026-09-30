@@ -98,6 +98,19 @@ void     tm_sheet_set_col_width (TmSheet *sheet, int col, int width);
 
 /* The settings a simulation runs with, kept with the sheet and saved in
  * its file. */
+/* How the futures are drawn.  Plain Monte Carlo draws every input
+ * independently each time.  Latin hypercube sampling splits each input's
+ * range into as many equally likely strata as there are futures and draws
+ * from every stratum exactly once, so that the futures cover each input
+ * evenly; results settle with far fewer of them. */
+typedef enum {
+  TM_SAMPLING_MONTE_CARLO,
+  TM_SAMPLING_LATIN_HYPERCUBE
+} TmSampling;
+
+TmSampling tm_sheet_sampling     (TmSheet *sheet);
+void       tm_sheet_set_sampling (TmSheet *sheet, TmSampling sampling);
+
 int      tm_sheet_iterations     (TmSheet *sheet);
 void     tm_sheet_set_iterations (TmSheet *sheet, int iterations);
 guint64  tm_sheet_seed           (TmSheet *sheet);

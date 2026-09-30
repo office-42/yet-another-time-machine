@@ -19,7 +19,7 @@
 static TmValue
 fn_rand (TmEvalContext *ctx, TmArg *args, int n)
 {
-  return tm_value_number (tm_rng_uniform (ctx->rng));
+  return tm_value_number (draw_uniform (ctx));
 }
 
 static TmValue
@@ -34,7 +34,7 @@ fn_randbetween (TmEvalContext *ctx, TmArg *args, int n)
   hi = floor (hi);
   if (hi < lo)
     return tm_value_error (TM_ERR_NUM);
-  return tm_value_number ((double) tm_rng_int (ctx->rng, (gint64) lo, (gint64) hi));
+  return tm_value_number (MIN (hi, lo + floor (draw_uniform (ctx) * (hi - lo + 1))));
 }
 
 static TmValue
@@ -47,7 +47,7 @@ fn_uniform (TmEvalContext *ctx, TmArg *args, int n)
   ARG_NUM (1, hi);
   if (hi < lo)
     return tm_value_error (TM_ERR_NUM);
-  return tm_value_number (lo + (hi - lo) * tm_rng_uniform (ctx->rng));
+  return tm_value_number (lo + (hi - lo) * draw_uniform (ctx));
 }
 
 static TmValue
@@ -60,7 +60,7 @@ fn_normal (TmEvalContext *ctx, TmArg *args, int n)
   ARG_NUM (1, sd);
   if (sd < 0)
     return tm_value_error (TM_ERR_NUM);
-  return tm_value_number (mean + sd * tm_rng_normal (ctx->rng));
+  return tm_value_number (mean + sd * draw_normal (ctx));
 }
 
 /* Parameterised by the mean and standard deviation of the quantity
@@ -77,13 +77,14 @@ fn_lognormal (TmEvalContext *ctx, TmArg *args, int n)
     return tm_value_error (TM_ERR_NUM);
   s2 = log1p ((sd * sd) / (mean * mean));
   mu = log (mean) - s2 / 2;
-  return tm_value_number (exp (mu + sqrt (s2) * tm_rng_normal (ctx->rng)));
+  return tm_value_number (exp (mu + sqrt (s2) * draw_normal (ctx)));
 }
 
 static TmValue
 fn_triangular (TmEvalContext *ctx, TmArg *args, int n)
 {
   TmValue err;
+  double u;
   double lo, mode, hi;
 
   ARG_NUM (0, lo);
@@ -91,6 +92,8 @@ fn_triangular (TmEvalContext *ctx, TmArg *args, int n)
   ARG_NUM (2, hi);
   if (!(lo <= mode && mode <= hi))
     return tm_value_error (TM_ERR_NUM);
+  if (stratified (ctx, &u))
+    return tm_value_number (tm_triangular_inv (u, lo, mode, hi));
   return tm_value_number (tm_rng_triangular (ctx->rng, lo, mode, hi));
 }
 
@@ -102,6 +105,7 @@ static TmValue
 fn_pert (TmEvalContext *ctx, TmArg *args, int n)
 {
   TmValue err;
+  double u;
   double lo, mode, hi, lambda, a, b;
 
   ARG_NUM (0, lo);
@@ -114,13 +118,15 @@ fn_pert (TmEvalContext *ctx, TmArg *args, int n)
     return tm_value_number (lo);
   a = 1 + lambda * (mode - lo) / (hi - lo);
   b = 1 + lambda * (hi - mode) / (hi - lo);
-  return tm_value_number (lo + (hi - lo) * tm_rng_beta (ctx->rng, a, b));
+  return tm_value_number (lo + (hi - lo) * (stratified (ctx, &u) ? tm_beta_inv (u, a, b)
+                                                               : tm_rng_beta (ctx->rng, a, b)));
 }
 
 static TmValue
 fn_beta (TmEvalContext *ctx, TmArg *args, int n)
 {
   TmValue err;
+  double u;
   double a, b, lo, hi;
 
   ARG_NUM (0, a);
@@ -129,20 +135,23 @@ fn_beta (TmEvalContext *ctx, TmArg *args, int n)
   OPT_NUM (3, hi, 1);
   if (a <= 0 || b <= 0 || hi < lo)
     return tm_value_error (TM_ERR_NUM);
-  return tm_value_number (lo + (hi - lo) * tm_rng_beta (ctx->rng, a, b));
+  return tm_value_number (lo + (hi - lo) * (stratified (ctx, &u) ? tm_beta_inv (u, a, b)
+                                                               : tm_rng_beta (ctx->rng, a, b)));
 }
 
 static TmValue
 fn_gamma (TmEvalContext *ctx, TmArg *args, int n)
 {
   TmValue err;
+  double u;
   double shape, scale;
 
   ARG_NUM (0, shape);
   ARG_NUM (1, scale);
   if (shape <= 0 || scale <= 0)
     return tm_value_error (TM_ERR_NUM);
-  return tm_value_number (scale * tm_rng_gamma (ctx->rng, shape));
+  return tm_value_number (scale * (stratified (ctx, &u) ? tm_gamma_inv (u, shape)
+                                                     : tm_rng_gamma (ctx->rng, shape)));
 }
 
 static TmValue
@@ -154,18 +163,21 @@ fn_expon (TmEvalContext *ctx, TmArg *args, int n)
   ARG_NUM (0, mean);
   if (mean <= 0)
     return tm_value_error (TM_ERR_NUM);
-  return tm_value_number (mean * tm_rng_exponential (ctx->rng));
+  return tm_value_number (mean * -log1p (-draw_uniform (ctx)));
 }
 
 static TmValue
 fn_poisson (TmEvalContext *ctx, TmArg *args, int n)
 {
   TmValue err;
+  double u;
   double mean;
 
   ARG_NUM (0, mean);
   if (mean < 0)
     return tm_value_error (TM_ERR_NUM);
+  if (stratified (ctx, &u))
+    return tm_value_number (tm_poisson_inv (u, mean));
   return tm_value_number ((double) tm_rng_poisson (ctx->rng, mean));
 }
 
@@ -173,6 +185,7 @@ static TmValue
 fn_binomial (TmEvalContext *ctx, TmArg *args, int n)
 {
   TmValue err;
+  double u;
   double trials, p;
 
   ARG_NUM (0, trials);
@@ -180,6 +193,8 @@ fn_binomial (TmEvalContext *ctx, TmArg *args, int n)
   trials = floor (trials);
   if (trials < 0 || p < 0 || p > 1)
     return tm_value_error (TM_ERR_NUM);
+  if (stratified (ctx, &u))
+    return tm_value_number (tm_binomial_inv (u, trials, p));
   return tm_value_number ((double) tm_rng_binomial (ctx->rng, (gint64) trials, p));
 }
 
@@ -192,13 +207,14 @@ fn_bernoulli (TmEvalContext *ctx, TmArg *args, int n)
   ARG_NUM (0, p);
   if (p < 0 || p > 1)
     return tm_value_error (TM_ERR_NUM);
-  return tm_value_number (tm_rng_uniform (ctx->rng) < p ? 1 : 0);
+  return tm_value_number (draw_uniform (ctx) < p ? 1 : 0);
 }
 
 static TmValue
 fn_student (TmEvalContext *ctx, TmArg *args, int n)
 {
   TmValue err;
+  double u;
   double df, mean, scale;
 
   ARG_NUM (0, df);
@@ -206,7 +222,8 @@ fn_student (TmEvalContext *ctx, TmArg *args, int n)
   OPT_NUM (2, scale, 1);
   if (df <= 0 || scale < 0)
     return tm_value_error (TM_ERR_NUM);
-  return tm_value_number (mean + scale * tm_rng_student_t (ctx->rng, df));
+  return tm_value_number (mean + scale * (stratified (ctx, &u) ? tm_t_inv (u, df)
+                                                             : tm_rng_student_t (ctx->rng, df)));
 }
 
 /* An estimate given as the range one is so sure of -- 90% unless told
@@ -223,7 +240,7 @@ fn_ci (TmEvalContext *ctx, TmArg *args, int n)
   if (hi < lo || conf <= 0 || conf >= 1)
     return tm_value_error (TM_ERR_NUM);
   z = tm_norm_inv (0.5 + conf / 2);
-  return tm_value_number ((lo + hi) / 2 + (hi - lo) / (2 * z) * tm_rng_normal (ctx->rng));
+  return tm_value_number ((lo + hi) / 2 + (hi - lo) / (2 * z) * draw_normal (ctx));
 }
 
 /* The same for a quantity that cannot go below zero and whose upside is
@@ -243,7 +260,7 @@ fn_logci (TmEvalContext *ctx, TmArg *args, int n)
   z = tm_norm_inv (0.5 + conf / 2);
   mu = (log (lo) + log (hi)) / 2;
   sigma = (log (hi) - log (lo)) / (2 * z);
-  return tm_value_number (exp (mu + sigma * tm_rng_normal (ctx->rng)));
+  return tm_value_number (exp (mu + sigma * draw_normal (ctx)));
 }
 
 /* One of the values, each as likely as its weight says. */
@@ -274,7 +291,7 @@ fn_discrete (TmEvalContext *ctx, TmArg *args, int n)
     }
   if (total > 0)
     {
-      u = tm_rng_uniform (ctx->rng) * total;
+      u = draw_uniform (ctx) * total;
       for (int i = 0; i < nw; i++)
         {
           acc += w[i]->as.number;
@@ -307,7 +324,7 @@ fn_bootstrap (TmEvalContext *ctx, TmArg *args, int n)
   if (k == 0)
     r = tm_value_error (TM_ERR_NUM);
   else
-    r = tm_value_copy (nums[tm_rng_int (ctx->rng, 0, k - 1)]);
+    r = tm_value_copy (nums[MIN (k - 1, (int) floor (draw_uniform (ctx) * k))]);
   g_free (nums);
   g_free (cells);
   return r;
@@ -330,7 +347,7 @@ fn_gbm (TmEvalContext *ctx, TmArg *args, int n)
   if (sigma < 0 || t < 0)
     return tm_value_error (TM_ERR_NUM);
   return tm_value_number (s0 * exp ((mu - sigma * sigma / 2) * t
-                                    + sigma * sqrt (t) * tm_rng_normal (ctx->rng)));
+                                    + sigma * sqrt (t) * draw_normal (ctx)));
 }
 
 /* Keelin's metalog, three terms, from the 10th, 50th and 90th
@@ -356,7 +373,7 @@ fn_metalog (TmEvalContext *ctx, TmArg *args, int n)
   a3 = (p90 + p10 - 2 * p50) / (0.8 * k);
   if (fabs (a3) / a2 >= 1.66711)
     return tm_value_error (TM_ERR_NUM);
-  u = tm_rng_uniform (ctx->rng);
+  u = draw_uniform (ctx);
   l = log (u / (1 - u));
   return tm_value_number (p50 + a2 * l + a3 * (u - 0.5) * l);
 }

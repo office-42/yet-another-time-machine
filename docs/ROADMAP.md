@@ -30,12 +30,16 @@ What exists, and what comes next, roughly in order.
 - More judgment: `LAPLACE`, `POOL.ODDS`, `REFCLASS`, and `RAND.METALOG`
   from three percentiles.
 - A prompt to save changes on closing.
+- Latin hypercube sampling, with an inverse distribution function for
+  every distribution; `BETA.INV`, `GAMMA.INV`, `T.INV` and their kin as
+  spreadsheet functions.
+- In-cell editing, and point mode: clicking cells while typing a formula
+  inserts their references.
+- Sample paths drawn through the fan chart.
 - Terminal front-end and smoke test; CI on Linux.
 
 ## Next
 
-- **Latin hypercube sampling**, for smaller simulation error at the same
-  number of futures.
 - **Correlated inputs**, through the Iman–Conover rank reordering.
 - **More forecasting**: damped trend (the most robust automatic method),
   simple exponential smoothing, the naive, seasonal naive and drift
@@ -45,7 +49,5 @@ What exists, and what comes next, roughly in order.
   calibration tables.
 - **Convergence**: stopping automatically once the chosen statistics are
   known to a tolerance.
-- **In-cell editing and point mode** (clicking cells while typing a
-  formula inserts their references).
 - Named ranges; more than one sheet.
 - macOS and Windows builds.

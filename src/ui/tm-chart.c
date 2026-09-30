@@ -21,6 +21,8 @@ typedef struct {
   gboolean simulated;   /* FALSE: a plain fact, all percentiles alike */
   gboolean valid;
   char *label;
+  const double *raw;    /* one sample per future, when simulated */
+  int n_raw;
 } Point;
 
 struct _TmChart {
@@ -354,6 +356,50 @@ draw_fan (TmChart *self, cairo_t *cr, PangoLayout *layout, int width, int height
         }
     }
 
+  /* A dozen single futures, faintly: bands drawn point by point hide
+   * what one path through them looks like -- how it wanders, and that
+   * no future follows the median. */
+  {
+    int n_raw = 0;
+
+    for (int i = 0; i < n; i++)
+      if (pts[i].raw != NULL)
+        n_raw = pts[i].n_raw;
+    cairo_set_line_width (cr, 0.8);
+    for (int k = 0; k < 12 && n_raw > 0; k++)
+      {
+        int it = (int) (((gint64) k * 7919 + 13) % n_raw);
+        gboolean pen = FALSE;
+
+        for (int i = 0; i < n; i++)
+          {
+            double v;
+            gboolean next_sim = i + 1 < n && pts[i + 1].simulated;
+
+            if (!pts[i].valid || (!pts[i].simulated && !next_sim))
+              {
+                pen = FALSE;
+                continue;
+              }
+            v = pts[i].simulated && pts[i].raw != NULL && it < pts[i].n_raw
+                ? pts[i].raw[it] : pts[i].p50;
+            if (isnan (v))
+              {
+                pen = FALSE;
+                continue;
+              }
+            v = CLAMP (v, lo, hi);
+            if (!pen)
+              cairo_move_to (cr, XOF (i), YOF (v));
+            else
+              cairo_line_to (cr, XOF (i), YOF (v));
+            pen = TRUE;
+          }
+        set_rgb (cr, FAN, 0.35);
+        cairo_stroke (cr);
+      }
+  }
+
   /* The median through the futures, and the history as a darker line. */
   cairo_set_line_width (cr, 2);
   cairo_set_line_join (cr, CAIRO_LINE_JOIN_ROUND);
@@ -466,6 +512,7 @@ draw (TmChart *self, cairo_t *cr, int width, int height)
               pts[i].p75 = s.p75;
               pts[i].p95 = s.p95;
               pts[i].mean = s.mean;
+              pts[i].raw = tm_sim_samples (sim, row, col, FALSE, &pts[i].n_raw);
               pts[i].simulated = TRUE;
               pts[i].valid = TRUE;
               simulated++;

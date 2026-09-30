@@ -27,6 +27,10 @@ struct _TmEvalContext {
    * NaN where an iteration gave no number, or -- if sorted -- only the
    * numbers, in ascending order.  NULL if there are none. */
   const double  *(*samples) (gpointer data, int row, int col, gboolean sorted, int *n);
+  /* Under Latin hypercube sampling, the next stratified uniform for the
+   * cell being worked out; FALSE under plain Monte Carlo, when a random
+   * function draws from rng with its own sampler instead. */
+  gboolean       (*stratified) (gpointer data, double *u);
   gpointer data;
 
   TmRng   *rng;

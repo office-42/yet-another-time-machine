@@ -40,7 +40,14 @@ struct _TmSheet {
   TmSim        *sim;
   int           iterations;
   guint64       seed;
+  TmSampling    sampling;
   gboolean      modified;
+
+  /* While a Latin hypercube simulation runs: for each cell and each
+   * random draw within its formula (its slot), the order in which the
+   * futures visit the strata. */
+  GHashTable   *strata;      /* guint64 (cell key * 64 + slot) -> int[] */
+  int           slot;
 
   /* Which draw every random cell makes: a cell's stream is seeded from
    * these and from where the cell is, and from nothing else. */
@@ -128,6 +135,7 @@ compute (TmSheet *sheet, Cell *c, int row, int col)
 {
   gboolean outer_random = sheet->ctx.random;
   int outer_row = sheet->ctx.row, outer_col = sheet->ctx.col;
+  int outer_slot = sheet->slot;
   TmRng *outer_rng = sheet->ctx.rng;
   TmRng stream;
   TmValue v;
@@ -137,6 +145,7 @@ compute (TmSheet *sheet, Cell *c, int row, int col)
   sheet->ctx.random = FALSE;
   sheet->ctx.row = row;
   sheet->ctx.col = col;
+  sheet->slot = 0;
   /* The stream lives on this frame, so that a cell worked out in the
    * middle of another's formula does not disturb the other's draws. */
   if (c->draws)
@@ -160,6 +169,7 @@ compute (TmSheet *sheet, Cell *c, int row, int col)
   c->computing = FALSE;
 
   sheet->depth--;
+  sheet->slot = outer_slot;
   sheet->ctx.rng = outer_rng;
   sheet->ctx.random = outer_random || c->random;
   sheet->ctx.row = outer_row;
@@ -184,6 +194,46 @@ cell_value (gpointer data, int row, int col)
         sheet->ctx.random = TRUE;
     }
   return &c->value;
+}
+
+/* A stratified uniform for draw number slot of the cell being worked out,
+ * in future stream_index: stratum perm[future] of the iterations, and a
+ * point within it from the cell's own stream. */
+static gboolean
+cell_stratified (gpointer data, double *u)
+{
+  TmSheet *sheet = data;
+  int n = sheet->iterations;
+  guint64 key;
+  int *perm;
+
+  if (sheet->strata == NULL || sheet->slot >= 64 || sheet->stream_index >= (guint64) n)
+    return FALSE;
+  key = tm_key (sheet->ctx.row, sheet->ctx.col) * 64 + (guint64) sheet->slot++;
+  perm = g_hash_table_lookup (sheet->strata, &key);
+  if (perm == NULL)
+    {
+      TmRng rng;
+      guint64 *k = g_new (guint64, 1);
+
+      /* A shuffle of 0..n-1 (Fisher and Yates), seeded from the seed and
+       * the cell, so that each input's strata pair up with the others'
+       * at random but the same way every run. */
+      tm_rng_seed (&rng, sheet->seed ^ (key * 0x9e3779b97f4a7c15ULL));
+      perm = g_new (int, n);
+      for (int i = 0; i < n; i++)
+        perm[i] = i;
+      for (int i = n - 1; i > 0; i--)
+        {
+          int j = (int) tm_rng_int (&rng, 0, i), t = perm[i];
+          perm[i] = perm[j];
+          perm[j] = t;
+        }
+      *k = key;
+      g_hash_table_insert (sheet->strata, k, perm);
+    }
+  *u = (perm[sheet->stream_index] + tm_rng_uniform (sheet->ctx.rng)) / n;
+  return TRUE;
 }
 
 static const double *
@@ -214,6 +264,7 @@ tm_sheet_new (void)
   sheet->stream_seed = sheet->draw_seed;
   sheet->ctx.cell = cell_value;
   sheet->ctx.samples = cell_samples;
+  sheet->ctx.stratified = cell_stratified;
   sheet->ctx.data = sheet;
   tm_rng_seed (&sheet->fallback, 1);
   sheet->ctx.rng = &sheet->fallback;
@@ -247,6 +298,7 @@ tm_sheet_clear (TmSheet *sheet)
   g_clear_pointer (&sheet->sim, tm_sim_free);
   sheet->iterations = 10000;
   sheet->seed = 1;
+  sheet->sampling = TM_SAMPLING_MONTE_CARLO;
   sheet->modified = FALSE;
 }
 
@@ -742,6 +794,15 @@ tm_sheet_set_col_width (TmSheet *sheet, int col, int width)
 }
 
 int      tm_sheet_iterations (TmSheet *sheet) { return sheet->iterations; }
+TmSampling tm_sheet_sampling (TmSheet *sheet) { return sheet->sampling; }
+
+void
+tm_sheet_set_sampling (TmSheet *sheet, TmSampling sampling)
+{
+  if (sampling != sheet->sampling)
+    sheet->modified = TRUE;
+  sheet->sampling = sampling;
+}
 guint64  tm_sheet_seed (TmSheet *sheet) { return sheet->seed; }
 TmSim   *tm_sheet_get_sim (TmSheet *sheet) { return sheet->sim; }
 gboolean tm_sheet_modified (TmSheet *sheet) { return sheet->modified; }
@@ -804,7 +865,8 @@ tm_sheet_simulate (TmSheet *sheet, TmSimProgress progress, gpointer data)
   guint n_keys;
   guint64 *keys;
   gint64 start = g_get_monotonic_time ();
-  TmSim *sim = tm_sim_new (iterations, sheet->seed);
+  gboolean latin = sheet->sampling == TM_SAMPLING_LATIN_HYPERCUBE;
+  TmSim *sim = tm_sim_new (iterations, sheet->seed, latin);
   gboolean done = TRUE;
   guint n_random = 0;
 
@@ -822,6 +884,8 @@ tm_sheet_simulate (TmSheet *sheet, TmSimProgress progress, gpointer data)
    * uncertain cells make themselves known. */
   sheet->stream_seed = sheet->seed ^ 0x5851f42d4c957f2dULL;
   sheet->stream_index = 0;
+  if (latin)
+    sheet->strata = g_hash_table_new_full (g_int64_hash, g_int64_equal, g_free, g_free);
   evaluate_all (sheet);
   for (guint i = 0; i < n_keys; i++)
     {
@@ -872,6 +936,7 @@ tm_sheet_simulate (TmSheet *sheet, TmSimProgress progress, gpointer data)
   g_free (keys);
   g_array_free (targets, TRUE);
   g_hash_table_destroy (wanted);
+  g_clear_pointer (&sheet->strata, g_hash_table_destroy);
 
   if (!done)
     {

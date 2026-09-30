@@ -185,80 +185,6 @@ fn_growth (TmEvalContext *ctx, TmArg *args, int n)
   return tm_value_number (exp (fit.intercept + fit.slope * x));
 }
 
-/* Student's t quantile, by bisection on the distribution function worked
- * out through the regularised incomplete beta function's continued
- * fraction.  Only prediction intervals need it, so speed is no object. */
-static double
-beta_cf (double a, double b, double x)
-{
-  double c = 1, d = 1 - (a + b) * x / (a + 1), h;
-
-  if (fabs (d) < 1e-300)
-    d = 1e-300;
-  d = 1 / d;
-  h = d;
-  for (int m = 1; m <= 300; m++)
-    {
-      double m2 = 2.0 * m, aa, del;
-
-      aa = m * (b - m) * x / ((a + m2 - 1) * (a + m2));
-      d = 1 + aa * d;
-      if (fabs (d) < 1e-300) d = 1e-300;
-      c = 1 + aa / c;
-      if (fabs (c) < 1e-300) c = 1e-300;
-      d = 1 / d;
-      h *= d * c;
-      aa = -(a + m) * (a + b + m) * x / ((a + m2) * (a + m2 + 1));
-      d = 1 + aa * d;
-      if (fabs (d) < 1e-300) d = 1e-300;
-      c = 1 + aa / c;
-      if (fabs (c) < 1e-300) c = 1e-300;
-      d = 1 / d;
-      del = d * c;
-      h *= del;
-      if (fabs (del - 1) < 1e-14)
-        break;
-    }
-  return h;
-}
-
-static double
-beta_inc (double a, double b, double x)
-{
-  double bt;
-
-  if (x <= 0) return 0;
-  if (x >= 1) return 1;
-  bt = exp (lgamma (a + b) - lgamma (a) - lgamma (b) + a * log (x) + b * log1p (-x));
-  if (x < (a + 1) / (a + b + 2))
-    return bt * beta_cf (a, b, x) / a;
-  return 1 - bt * beta_cf (b, a, 1 - x) / b;
-}
-
-static double
-t_cdf (double t, double df)
-{
-  double x = df / (df + t * t);
-  double tail = 0.5 * beta_inc (df / 2, 0.5, x);
-  return t >= 0 ? 1 - tail : tail;
-}
-
-static double
-t_inv (double p, double df)
-{
-  double lo = -1e3, hi = 1e3;
-
-  for (int i = 0; i < 200; i++)
-    {
-      double mid = (lo + hi) / 2;
-      if (t_cdf (mid, df) < p)
-        lo = mid;
-      else
-        hi = mid;
-    }
-  return (lo + hi) / 2;
-}
-
 /* The line's forecast plus a draw from its prediction error: Student's t
  * with n - 2 degrees of freedom, scaled by the standard error of a new
  * observation at x, s sqrt(1 + 1/n + (x - mean)^2 / Sxx). */
@@ -267,7 +193,7 @@ fn_rand_linear (TmEvalContext *ctx, TmArg *args, int n)
 {
   TmValue err;
   LineFit fit;
-  double x, s, se;
+  double x, s, se, u;
 
   ARG_NUM (0, x);
   if (!fit_args (ctx, &args[1], &args[2], FALSE, &fit, &err))
@@ -276,6 +202,8 @@ fn_rand_linear (TmEvalContext *ctx, TmArg *args, int n)
     return tm_value_error (TM_ERR_DIV0);
   s = sqrt (fit.sse / (fit.n - 2));
   se = s * sqrt (1 + 1.0 / fit.n + (x - fit.mean_x) * (x - fit.mean_x) / fit.sxx);
+  if (stratified (ctx, &u))
+    return tm_value_number (fit.intercept + fit.slope * x + se * tm_t_inv (u, fit.n - 2));
   return tm_value_number (fit.intercept + fit.slope * x
                           + se * tm_rng_student_t (ctx->rng, fit.n - 2));
 }
@@ -297,7 +225,7 @@ fn_forecast_linear_confint (TmEvalContext *ctx, TmArg *args, int n)
     return tm_value_error (TM_ERR_DIV0);
   s = sqrt (fit.sse / (fit.n - 2));
   se = s * sqrt (1 + 1.0 / fit.n + (x - fit.mean_x) * (x - fit.mean_x) / fit.sxx);
-  return tm_value_number (se * t_inv (0.5 + conf / 2, fit.n - 2));
+  return tm_value_number (se * tm_t_inv (0.5 + conf / 2, fit.n - 2));
 }
 
 /* ---- Exponential smoothing -------------------------------------------- */
@@ -505,18 +433,21 @@ ets_fit_free (gpointer p)
   g_free (fit);
 }
 
+/* FNV-1a over the data's bytes, mixed at the end: a key the cache can
+ * trust (a clash would need two series among a few hundred to agree in
+ * 64 bits) at a fraction of a cryptographic hash's cost. */
 static char *
 ets_key (const double *t, const double *y, int n, int season_arg)
 {
-  GChecksum *sum = g_checksum_new (G_CHECKSUM_SHA1);
-  char *key;
+  guint64 h = 0xcbf29ce484222325ULL;
+  const guchar *parts[2] = { (const guchar *) t, (const guchar *) y };
 
-  g_checksum_update (sum, (const guchar *) t, sizeof (double) * n);
-  g_checksum_update (sum, (const guchar *) y, sizeof (double) * n);
-  g_checksum_update (sum, (const guchar *) &season_arg, sizeof season_arg);
-  key = g_strdup (g_checksum_get_string (sum));
-  g_checksum_free (sum);
-  return key;
+  for (int k = 0; k < 2; k++)
+    for (gsize i = 0; i < sizeof (double) * (gsize) n; i++)
+      h = (h ^ parts[k][i]) * 0x100000001b3ULL;
+  h ^= (guint64) season_arg * 0x9e3779b97f4a7c15ULL;
+  h = (h ^ (h >> 31)) * 0xbf58476d1ce4e5b9ULL;
+  return g_strdup_printf ("%016" G_GINT64_MODIFIER "x:%d", h ^ (h >> 29), n);
 }
 
 typedef struct {
@@ -731,7 +662,7 @@ fn_rand_ets (TmEvalContext *ctx, TmArg *args, int n)
   if (!ets_steps (ctx, &args[0], fit, &h, &err))
     return err;
   ets_forecast (fit, h, &mean, &se);
-  return tm_value_number (mean + se * tm_rng_normal (ctx->rng));
+  return tm_value_number (mean + se * draw_normal (ctx));
 }
 
 static TmValue

@@ -35,6 +35,18 @@ struct _TmGrid {
 
   double scroll_accum;
   PangoFontDescription *font;
+
+  /* An edit in progress, mirrored from the formula bar. */
+  char *edit_text;
+  TmRef edit_cell;
+  int edit_caret;
+
+  /* Point mode. */
+  gboolean pointing;
+  gboolean point_dragging;
+  gboolean has_point;
+  TmRange point;
+  TmRef point_anchor;
 };
 
 G_DEFINE_FINAL_TYPE (TmGrid, tm_grid, GTK_TYPE_WIDGET)
@@ -42,6 +54,7 @@ G_DEFINE_FINAL_TYPE (TmGrid, tm_grid, GTK_TYPE_WIDGET)
 enum {
   SIGNAL_SELECTION_CHANGED,
   SIGNAL_EDIT,
+  SIGNAL_POINT,
   N_SIGNALS
 };
 
@@ -590,6 +603,51 @@ draw (TmGrid *self, cairo_t *cr, int width, int height)
     cairo_rectangle (cr, x1 - 4, y1 - 4, 6, 6);
     cairo_fill (cr);
   }
+
+  /* The range being pointed at, dashed, as Excel marks it. */
+  if (self->has_point)
+    {
+      double dash[] = { 4, 3 };
+      int x0 = col_x (self, self->point.col0), y0 = row_y (self, self->point.row0);
+      int x1 = col_x (self, self->point.col1 + 1), y1 = row_y (self, self->point.row1 + 1);
+
+      cairo_set_source_rgb (cr, 0.85, 0.35, 0.10);
+      cairo_set_line_width (cr, 2);
+      cairo_set_dash (cr, dash, 2, 0);
+      cairo_rectangle (cr, x0 + 1, y0 + 1, x1 - x0 - 2, y1 - y0 - 2);
+      cairo_stroke (cr);
+      cairo_set_dash (cr, NULL, 0, 0);
+    }
+
+  /* The edit, in its cell, running on to the right as far as it needs. */
+  if (self->edit_text != NULL)
+    {
+      int x = col_x (self, self->edit_cell.col), y = row_y (self, self->edit_cell.row);
+      int w = col_width (self, self->edit_cell.col), tw, th;
+      PangoRectangle caret;
+      int index;
+
+      pango_layout_set_text (layout, self->edit_text, -1);
+      pango_layout_get_pixel_size (layout, &tw, &th);
+      w = MAX (w, tw + 2 * PAD + 4);
+      cairo_set_source_rgb (cr, 1, 1, 1);
+      cairo_rectangle (cr, x, y, w, ROW_HEIGHT);
+      cairo_fill (cr);
+      set_rgb (cr, ACCENT);
+      cairo_set_line_width (cr, 2);
+      cairo_rectangle (cr, x, y, w - 1, ROW_HEIGHT - 1);
+      cairo_stroke (cr);
+      set_rgb (cr, TEXT);
+      cairo_move_to (cr, x + PAD, y + (ROW_HEIGHT - th) / 2.0);
+      pango_cairo_show_layout (cr, layout);
+
+      index = (int) (g_utf8_offset_to_pointer (self->edit_text,
+                                               MIN (self->edit_caret, (int) g_utf8_strlen (self->edit_text, -1)))
+                     - self->edit_text);
+      pango_layout_index_to_pos (layout, index, &caret);
+      cairo_rectangle (cr, x + PAD + caret.x / PANGO_SCALE, y + 3, 1, ROW_HEIGHT - 6);
+      cairo_fill (cr);
+    }
   cairo_restore (cr);
 
   g_object_unref (layout);
@@ -727,7 +785,6 @@ on_pressed (GtkGestureClick *gesture, int n_press, double x, double y, TmGrid *s
   GdkModifierType state = gtk_event_controller_get_current_event_state (GTK_EVENT_CONTROLLER (gesture));
   int row, col, edge;
 
-  gtk_widget_grab_focus (GTK_WIDGET (self));
   edge = edge_at (self, x, y);
   if (edge >= 0)
     {
@@ -746,6 +803,18 @@ on_pressed (GtkGestureClick *gesture, int n_press, double x, double y, TmGrid *s
     }
 
   cell_at (self, x, y, &row, &col);
+  if (self->pointing && y >= HEADER_HEIGHT && x >= HEADER_WIDTH)
+    {
+      TmRange r = { row, col, row, col };
+
+      /* The formula bar keeps the focus: the click is part of the edit. */
+      self->point_anchor.row = row;
+      self->point_anchor.col = col;
+      self->point_dragging = TRUE;
+      g_signal_emit (self, signals[SIGNAL_POINT], 0, &r);
+      return;
+    }
+  gtk_widget_grab_focus (GTK_WIDGET (self));
   if (y < HEADER_HEIGHT && x >= HEADER_WIDTH)
     {
       /* A column header selects the column's used part. */
@@ -797,6 +866,20 @@ on_drag_update (GtkGestureDrag *gesture, double dx, double dy, TmGrid *self)
       gtk_widget_queue_draw (GTK_WIDGET (self));
       return;
     }
+  if (self->point_dragging)
+    {
+      TmRange r;
+
+      cell_at (self, sx + dx, sy + dy, &row, &col);
+      r.row0 = self->point_anchor.row;
+      r.col0 = self->point_anchor.col;
+      r.row1 = row;
+      r.col1 = col;
+      tm_range_normalize (&r);
+      if (!self->has_point || memcmp (&r, &self->point, sizeof r) != 0)
+        g_signal_emit (self, signals[SIGNAL_POINT], 0, &r);
+      return;
+    }
   if (!self->dragging)
     return;
   cell_at (self, sx + dx, sy + dy, &row, &col);
@@ -808,6 +891,7 @@ static void
 on_drag_end (GtkGestureDrag *gesture, double dx, double dy, TmGrid *self)
 {
   self->dragging = FALSE;
+  self->point_dragging = FALSE;
   self->resizing_col = -1;
 }
 
@@ -858,6 +942,7 @@ tm_grid_dispose (GObject *object)
   g_clear_object (&self->hadj);
   g_clear_object (&self->vadj);
   g_clear_pointer (&self->font, pango_font_description_free);
+  g_clear_pointer (&self->edit_text, g_free);
   G_OBJECT_CLASS (tm_grid_parent_class)->dispose (object);
 }
 
@@ -879,6 +964,10 @@ tm_grid_class_init (TmGridClass *klass)
   signals[SIGNAL_EDIT] =
     g_signal_new ("edit", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST,
                   0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_STRING);
+  /* A TmRange pointed at, for the formula being typed. */
+  signals[SIGNAL_POINT] =
+    g_signal_new ("point", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST,
+                  0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_POINTER);
 
   gtk_widget_class_set_css_name (widget_class, "tmgrid");
 }
@@ -952,5 +1041,33 @@ void
 tm_grid_refresh (TmGrid *self)
 {
   update_adjustments (self);
+  gtk_widget_queue_draw (GTK_WIDGET (self));
+}
+
+void
+tm_grid_show_edit (TmGrid *self, TmRef cell, const char *text, int caret)
+{
+  g_free (self->edit_text);
+  self->edit_text = g_strdup (text);
+  self->edit_cell = cell;
+  self->edit_caret = caret;
+  if (text == NULL)
+    self->has_point = FALSE;
+  gtk_widget_queue_draw (GTK_WIDGET (self));
+}
+
+void
+tm_grid_set_pointing (TmGrid *self, gboolean pointing)
+{
+  self->pointing = pointing;
+  gtk_widget_set_cursor_from_name (GTK_WIDGET (self), pointing ? "cell" : NULL);
+}
+
+void
+tm_grid_show_point (TmGrid *self, const TmRange *range)
+{
+  self->has_point = range != NULL;
+  if (range != NULL)
+    self->point = *range;
   gtk_widget_queue_draw (GTK_WIDGET (self));
 }

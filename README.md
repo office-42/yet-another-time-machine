@@ -51,6 +51,8 @@ methods that forecasters, risk analysts and superforecasters use instead.
 - **Fair comparisons.** Every uncertain cell draws from a random stream
   of its own. Editing one cell leaves the others' draws alone, and two
   versions of a model run with the same seed see the same futures.
+- **Latin hypercube sampling**, @RISK's default, covers each input's
+  range evenly, so results settle with far fewer futures.
 
 Select one uncertain cell to see a histogram of its futures. Select a row
 or column of them — a quantity month by month — to see a fan chart that
@@ -135,10 +137,9 @@ analysis elsewhere.
 
 This is an early version. The engine, the simulator and the forecasting
 functions are done and checked. The window covers the essentials: a grid,
-a formula bar, fill, copy and paste, undo, number formats and the
-forecast panel. [docs/ROADMAP.md](docs/ROADMAP.md) lists what comes next:
-Latin hypercube sampling, correlated inputs, in-cell editing and more
-forecasting methods.
+a formula bar, fill, copy and paste, undo, number formats, the
+forecast panel, in-cell editing and point mode.
+[docs/ROADMAP.md](docs/ROADMAP.md) lists what comes next.
 
 ## License
 
