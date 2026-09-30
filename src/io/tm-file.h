@@ -10,6 +10,7 @@
  *     iterations	10000
  *     seed	1
  *     width	A	160
+ *     format	B1	#,##0
  *     cell	A1	Revenue
  *     cell	B1	=RAND.PERT(80,100,150)
  *

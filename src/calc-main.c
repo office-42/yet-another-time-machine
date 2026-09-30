@@ -30,6 +30,10 @@
  *     iterations 5000          simulation settings
  *     seed 42
  *     draws 7                  seed the ordinary recalculation's draws
+ *     recalc                   work every formula out again
+ *     redraw                   ... with the next draw from every random cell
+ *     format B1:B9 0.0%        a number format; no code for General
+ *     undo                     redo
  *     filldown A1:A9           fillright A1:F1
  *     copy A1:B2 D1            clear A1:B2
  *     load FILE                save FILE          export FILE
@@ -261,6 +265,14 @@ run_line (TmSheet *sheet, char *line)
     dump (sheet);
   else if (strcmp (line, "recalc") == 0)
     tm_sheet_recalc (sheet);
+  else if (strcmp (line, "redraw") == 0)
+    tm_sheet_redraw (sheet);
+  else if (strcmp (line, "undo") == 0 || strcmp (line, "redo") == 0)
+    {
+      if (!(line[0] == 'u' ? tm_sheet_undo (sheet) : tm_sheet_redo (sheet)))
+        printf ("nothing to %s\n", line);
+      tm_sheet_recalc (sheet);
+    }
   else if (strcmp (line, "functions") == 0)
     functions ();
   else if (strcmp (line, "simulate") == 0)
@@ -291,6 +303,16 @@ run_line (TmSheet *sheet, char *line)
     }
   else if (strcmp (line, "fan") == 0)
     fan (sheet, arg);
+  else if (strcmp (line, "format") == 0)
+    {
+      char *code = strchr (arg, ' ');
+
+      if (code != NULL)
+        *code++ = '\0';
+      if (!parse_range (arg, &range))
+        return FALSE;
+      tm_sheet_format_range (sheet, &range, code != NULL ? g_strstrip (code) : NULL);
+    }
   else if (strcmp (line, "iterations") == 0)
     tm_sheet_set_iterations (sheet, atoi (arg));
   else if (strcmp (line, "seed") == 0)

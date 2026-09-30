@@ -49,4 +49,3 @@ collect (TmEvalContext *ctx, TmArg *args, int n, TmValue *err)
   return a;
 }
 
-int tm_compare_doubles (const void *a, const void *b);

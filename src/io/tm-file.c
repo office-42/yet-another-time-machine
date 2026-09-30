@@ -95,6 +95,17 @@ load_tm (TmSheet *sheet, const char *contents, const char *path, GError **error)
               g_free (input);
             }
         }
+      else if (strcmp (f[0], "format") == 0 && nf == 3)
+        {
+          TmRef ref;
+
+          if (tm_ref_parse (f[1], &ref))
+            {
+              char *format = unescape (f[2]);
+              tm_sheet_set_format (sheet, ref.row, ref.col, format);
+              g_free (format);
+            }
+        }
       else if (strcmp (f[0], "width") == 0 && nf == 3)
         {
           int col;
@@ -124,6 +135,18 @@ save_cell (int row, int col, const char *input, gpointer data)
   g_free (text);
 }
 
+static void
+save_format (int row, int col, const char *format, gpointer data)
+{
+  GString *out = data;
+  char *name = tm_ref_name (row, col);
+  char *text = escape (format);
+
+  g_string_append_printf (out, "format\t%s\t%s\n", name, text);
+  g_free (name);
+  g_free (text);
+}
+
 static char *
 save_tm (TmSheet *sheet)
 {
@@ -138,6 +161,7 @@ save_tm (TmSheet *sheet)
         tm_col_name (c, name, sizeof name);
         g_string_append_printf (out, "width\t%s\t%d\n", name, tm_sheet_col_width (sheet, c));
       }
+  tm_sheet_foreach_format (sheet, save_format, out);
   tm_sheet_foreach (sheet, save_cell, out);
   return g_string_free (out, FALSE);
 }
@@ -296,6 +320,7 @@ tm_file_load (TmSheet *sheet, const char *path, GError **error)
   g_free (contents);
   if (ok)
     {
+      tm_sheet_forget_undo (sheet);
       tm_sheet_recalc (sheet);
       tm_sheet_set_modified (sheet, FALSE);
     }

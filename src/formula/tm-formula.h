@@ -87,4 +87,8 @@ typedef void (*TmRangeFunc) (const TmRange *range, gpointer data);
 void    tm_formula_foreach_range (const TmNode *node, const char *prefix,
                                   TmRangeFunc func, gpointer data);
 
+/* Whether the formula calls a function with any of flags (TM_FN_RANDOM,
+ * TM_FN_SIM) anywhere in it. */
+gboolean tm_formula_calls (const TmNode *node, guint flags);
+
 G_END_DECLS

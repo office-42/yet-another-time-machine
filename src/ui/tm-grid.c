@@ -5,6 +5,7 @@
  */
 
 #include "tm-grid.h"
+#include "tm-numfmt.h"
 
 #include <math.h>
 #include <string.h>
@@ -390,8 +391,26 @@ draw_cells (TmGrid *self, cairo_t *cr, PangoLayout *layout, int width, int heigh
           switch (v->type)
             {
             case TM_VALUE_NUMBER:
-              text = fit_number (layout, v->as.number, w - 2 * PAD);
-              align = PANGO_ALIGN_RIGHT;
+              {
+                const char *format = tm_sheet_get_format (self->sheet, r, c);
+
+                if (format != NULL)
+                  {
+                    /* A formatted number either fits or is hashes: its
+                     * digits are what the format says, no fewer. */
+                    text = tm_format_number (v->as.number, format);
+                    pango_layout_set_text (layout, text, -1);
+                    pango_layout_get_pixel_size (layout, &tw, NULL);
+                    if (tw > w - 2 * PAD)
+                      {
+                        g_free (text);
+                        text = g_strnfill (MAX (1, (w - 2 * PAD) / 8), '#');
+                      }
+                  }
+                else
+                  text = fit_number (layout, v->as.number, w - 2 * PAD);
+                align = PANGO_ALIGN_RIGHT;
+              }
               break;
             case TM_VALUE_TEXT:
               text = g_strdup (v->as.text);
@@ -638,6 +657,10 @@ on_key_pressed (GtkEventControllerKey *controller, guint keyval, guint keycode,
           gtk_widget_activate_action (w, "win.fill-down", NULL); return TRUE;
         case GDK_KEY_r: case GDK_KEY_R:
           gtk_widget_activate_action (w, "win.fill-right", NULL); return TRUE;
+        case GDK_KEY_z: case GDK_KEY_Z:
+          gtk_widget_activate_action (w, shift ? "win.redo" : "win.undo", NULL); return TRUE;
+        case GDK_KEY_y: case GDK_KEY_Y:
+          gtk_widget_activate_action (w, "win.redo", NULL); return TRUE;
         case GDK_KEY_a: case GDK_KEY_A:
           {
             TmRange all = { 0, 0, 0, 0 };

@@ -12,7 +12,7 @@ build — the same stack and the same principles as its sister project
 [office42-spreadsheet](https://github.com/office-42/office42-spreadsheet):
 a small, honest codebase that does one thing well.
 
-![Time Machine showing a product-launch model: inputs in lavender-tinted cells drawn from PERT, lognormal, triangular and Bernoulli distributions; the profit cell selected; and on the right a forecast panel with a histogram of 10,000 simulated profits — the loss-making futures in red — marked at P5, P50 and P95, with the mean, standard deviation, percentiles and a 27.7% chance of a loss](docs/images/launch.png)
+![Time Machine showing a product-launch model: inputs in lavender-tinted cells drawn from PERT, lognormal, triangular and Bernoulli distributions; the profit cell selected; and on the right a forecast panel with a histogram of 10,000 simulated profits — the loss-making futures in red — marked at P5, P50 and P95, the mean, standard deviation and percentiles in dollars, a 28.4% chance of a loss, and a tornado chart showing that market size and market share drive profit most](docs/images/launch.png)
 
 ## How it predicts
 
@@ -38,12 +38,19 @@ methods that forecasters, risk analysts and superforecasters use instead.
   error, so an extrapolation's uncertainty flows into the simulation.
 - **Stochastic processes.** Random walks and geometric Brownian motion
   (`RAND.GBM`), and bootstrap resampling of history (`RAND.BOOTSTRAP`).
-- **Judgment and keeping score.** Bayes' rule (`BAYES`), extremizing a
-  crowd's average probability (`EXTREMIZE`), and scoring forecasts
+- **Judgment and keeping score.** Bayes' rule (`BAYES`), pooling
+  forecasters by the geometric mean of their odds (`POOL.ODDS`),
+  extremizing (`EXTREMIZE`), Laplace's rule of succession (`LAPLACE`),
+  reference-class forecasting (`REFCLASS`), an expert's three percentiles
+  as a metalog distribution (`RAND.METALOG`), and scoring forecasts
   against what happened (`BRIER`, `LOGSCORE`).
-- **Sensitivity.** `SIM.CORREL` shows how much each input drives an
-  output. `SIM.TAILMEAN` gives the average of the worst futures
-  (expected shortfall).
+- **Sensitivity.** A tornado chart ranks the inputs by how much each one
+  drives the selected output (`SIM.CORREL` puts the figure in a cell).
+  `SIM.TAILMEAN` gives the average of the worst futures (expected
+  shortfall).
+- **Fair comparisons.** Every uncertain cell draws from a random stream
+  of its own. Editing one cell leaves the others' draws alone, and two
+  versions of a model run with the same seed see the same futures.
 
 Select one uncertain cell to see a histogram of its futures. Select a row
 or column of them — a quantity month by month — to see a fan chart that
@@ -96,12 +103,13 @@ simulate
 stats A3
 EOF
 simulated 10000 iterations, seed 1, 3 cells kept
-A3	iterations=10000 valid=10000 mean=5943.19 sd=3264.49 se=32.6
-A3	min=-2668.12 p5=993.744 p10=1941.97 p25=3570.39 p50=5714.05 p75=8020.12 p90=10369.3 p95=11748.7 max=19786.9
+A3	iterations=10000 valid=10000 mean=5989.59 sd=3305.74 se=33.1
+A3	min=-3509.26 p5=1037.5 p10=1944.16 p25=3633.16 p50=5698.69 p75=8141.3 p90=10449.7 p95=11878.1 max=20573
 ```
 
 It also has `histogram`, `fan`, `dump`, `load`, `save`, `export` (all
-samples to CSV), `filldown`, `fillright`, `copy` and `functions`.
+samples to CSV), `format`, `undo`, `redo`, `filldown`, `fillright`,
+`copy` and `functions`.
 [docs/GUIDE.md](docs/GUIDE.md) is the user guide.
 `sh build-aux/smoke-test.sh builddir/src/timemachine-calc` checks the
 engine end to end. It compares simulated means with what theory says.
@@ -127,10 +135,10 @@ analysis elsewhere.
 
 This is an early version. The engine, the simulator and the forecasting
 functions are done and checked. The window covers the essentials: a grid,
-a formula bar, fill, copy and paste, and the forecast panel.
-[docs/ROADMAP.md](docs/ROADMAP.md) lists what comes next: undo, number
-formats, Latin hypercube sampling, correlated inputs, a tornado chart and
-more forecasting methods.
+a formula bar, fill, copy and paste, undo, number formats and the
+forecast panel. [docs/ROADMAP.md](docs/ROADMAP.md) lists what comes next:
+Latin hypercube sampling, correlated inputs, in-cell editing and more
+forecasting methods.
 
 ## License
 

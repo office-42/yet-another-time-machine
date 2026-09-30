@@ -333,6 +333,34 @@ fn_gbm (TmEvalContext *ctx, TmArg *args, int n)
                                     + sigma * sqrt (t) * tm_rng_normal (ctx->rng)));
 }
 
+/* Keelin's metalog, three terms, from the 10th, 50th and 90th
+ * percentiles an expert gives: a smooth distribution that can lean
+ * either way, whose quantile function is simply
+ *
+ *     M(u) = a1 + a2 L + a3 (u - 1/2) L,   L = ln(u / (1 - u)).
+ *
+ * Not every triple makes a distribution; one that does not is #NUM!. */
+static TmValue
+fn_metalog (TmEvalContext *ctx, TmArg *args, int n)
+{
+  TmValue err;
+  double p10, p50, p90, k, a2, a3, u, l;
+
+  ARG_NUM (0, p10);
+  ARG_NUM (1, p50);
+  ARG_NUM (2, p90);
+  if (!(p10 < p50 && p50 < p90))
+    return tm_value_error (TM_ERR_NUM);
+  k = log (9.0);                        /* ln((1 - 0.1) / 0.1) */
+  a2 = (p90 - p10) / (2 * k);
+  a3 = (p90 + p10 - 2 * p50) / (0.8 * k);
+  if (fabs (a3) / a2 >= 1.66711)
+    return tm_value_error (TM_ERR_NUM);
+  u = tm_rng_uniform (ctx->rng);
+  l = log (u / (1 - u));
+  return tm_value_number (p50 + a2 * l + a3 * (u - 0.5) * l);
+}
+
 #define RND TM_FN_RANDOM
 
 const TmFunction tm_fn_random[] = {
@@ -352,6 +380,7 @@ const TmFunction tm_fn_random[] = {
   FN ("RAND.STUDENT", 1, 3, fn_student, RND, R, "RAND.STUDENT(df, [mean], [scale])", "Student's t: a bell curve with fat tails."),
   FN ("RAND.CI", 2, 3, fn_ci, RND, R, "RAND.CI(low, high, [confidence])", "A normal estimate from a range you are 90% sure of."),
   FN ("RAND.LOGCI", 2, 3, fn_logci, RND, R, "RAND.LOGCI(low, high, [confidence])", "A lognormal estimate from a range you are 90% sure of."),
+  FN ("RAND.METALOG", 3, 3, fn_metalog, RND, R, "RAND.METALOG(p10, p50, p90)", "An expert's three percentiles, as a smooth, possibly skewed curve."),
   FN ("RAND.DISCRETE", 2, 2, fn_discrete, RND, R, "RAND.DISCRETE(values, weights)", "One of the values, as likely as its weight."),
   FN ("RAND.BOOTSTRAP", 1, 1, fn_bootstrap, RND, R, "RAND.BOOTSTRAP(history)", "One of the numbers in the range: history resampled."),
   FN ("RAND.GBM", 4, 4, fn_gbm, RND, P, "RAND.GBM(start, drift, volatility, time)", "Geometric Brownian motion: a price after so much time."),

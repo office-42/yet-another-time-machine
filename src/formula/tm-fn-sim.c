@@ -156,39 +156,7 @@ fn_tailmean (TmEvalContext *ctx, TmArg *args, int n)
 
 /* How strongly two cells move together across the futures, by rank
  * (Spearman), which is what a tornado chart ranks inputs by: it does not
- * care whether the relation is a straight line.  Ties share their mean
- * rank.  The engine runs on one thread, so the sort's key can be a
- * static. */
-static const double *rank_keys;
-
-static int
-compare_by_key (const void *a, const void *b)
-{
-  double x = rank_keys[*(const int *) a], y = rank_keys[*(const int *) b];
-  return x < y ? -1 : x > y;
-}
-
-static void
-rank_of (const double *x, int n, double *rank)
-{
-  int *order = g_new (int, n);
-
-  for (int i = 0; i < n; i++)
-    order[i] = i;
-  rank_keys = x;
-  qsort (order, (size_t) n, sizeof (int), compare_by_key);
-  for (int i = 0; i < n;)
-    {
-      int j = i;
-      while (j + 1 < n && x[order[j + 1]] == x[order[i]])
-        j++;
-      for (int k = i; k <= j; k++)
-        rank[order[k]] = (i + j) / 2.0;
-      i = j + 1;
-    }
-  g_free (order);
-}
-
+ * care whether the relation is a straight line. */
 static TmValue
 fn_correl (TmEvalContext *ctx, TmArg *args, int n)
 {
@@ -196,7 +164,7 @@ fn_correl (TmEvalContext *ctx, TmArg *args, int n)
   int na, nb, k = 0;
   const double *a = samples_of (ctx, &args[0], FALSE, &na, &err);
   const double *b;
-  double *x, *y, *rx, *ry, mx = 0, my = 0, sxy = 0, sxx = 0, syy = 0;
+  double *x, *y, *rx, *ry, rho;
 
   if (a == NULL)
     return err;
@@ -223,28 +191,16 @@ fn_correl (TmEvalContext *ctx, TmArg *args, int n)
     }
   rx = g_new (double, k);
   ry = g_new (double, k);
-  rank_of (x, k, rx);
-  rank_of (y, k, ry);
-  for (int i = 0; i < k; i++)
-    {
-      mx += rx[i];
-      my += ry[i];
-    }
-  mx /= k;
-  my /= k;
-  for (int i = 0; i < k; i++)
-    {
-      sxy += (rx[i] - mx) * (ry[i] - my);
-      sxx += (rx[i] - mx) * (rx[i] - mx);
-      syy += (ry[i] - my) * (ry[i] - my);
-    }
+  tm_ranks (x, k, rx);
+  tm_ranks (y, k, ry);
+  rho = tm_correlation (rx, ry, k);
   g_free (x);
   g_free (y);
   g_free (rx);
   g_free (ry);
-  if (sxx == 0 || syy == 0)
+  if (isnan (rho))
     return tm_value_error (TM_ERR_DIV0);
-  return tm_value_number (sxy / sqrt (sxx * syy));
+  return tm_value_number (rho);
 }
 
 static TmValue

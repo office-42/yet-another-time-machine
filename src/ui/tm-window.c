@@ -9,6 +9,7 @@
 #include "tm-chart.h"
 #include "tm-file.h"
 #include "tm-eval.h"
+#include "tm-numfmt.h"
 
 #include <math.h>
 #include <string.h>
@@ -34,6 +35,14 @@ static const char *const STAT_NAMES[N_STATS] = {
   "P(< 0)", "Valid",
 };
 
+/* An input and how strongly the selected output moves with it. */
+typedef struct {
+  char  *label;
+  double rho;
+} Driver;
+
+#define MAX_DRIVERS 7
+
 struct _TmWindow {
   GtkApplicationWindow parent_instance;
 
@@ -49,6 +58,10 @@ struct _TmWindow {
   GtkWidget *panel_subtitle;
   GtkWidget *stat_values[N_STATS];
   GtkWidget *stats_box;
+  GtkWidget *drivers_title;
+  GtkWidget *tornado;
+  GArray    *drivers;        /* of Driver, strongest first */
+  gboolean   close_confirmed;
   GtkWidget *status;
   GtkWidget *progress;
   GtkWidget *stop_button;
@@ -105,12 +118,14 @@ sheet_changed (TmWindow *self)
 }
 
 static char *
-format_stat (double v)
+format_stat (double v, const char *format)
 {
   char buf[64];
 
   if (isnan (v))
     return g_strdup ("—");
+  if (format != NULL)
+    return tm_format_number (v, format);
   if (fabs (v) >= 1e12 || (fabs (v) < 1e-3 && v != 0))
     g_snprintf (buf, sizeof buf, "%.4g", v);
   else if (fabs (v) >= 1000)
@@ -168,6 +183,111 @@ cell_caption (TmSheet *sheet, int row, int col)
 /* ---- The forecast panel ----------------------------------------------- */
 
 static void
+clear_drivers (TmWindow *self)
+{
+  for (guint i = 0; i < self->drivers->len; i++)
+    g_free (g_array_index (self->drivers, Driver, i).label);
+  g_array_set_size (self->drivers, 0);
+}
+
+static int
+compare_drivers (const void *a, const void *b)
+{
+  double x = fabs (((const Driver *) a)->rho), y = fabs (((const Driver *) b)->rho);
+  return x > y ? -1 : x < y;
+}
+
+/* The inputs -- cells whose own formulas draw at random -- ranked by how
+ * strongly the output moves with them across the futures: a tornado. */
+static void
+find_drivers (TmWindow *self, TmSim *sim, int row, int col)
+{
+  int n;
+  TmRef *cells = tm_sim_cells (sim, &n);
+
+  clear_drivers (self);
+  for (int i = 0; i < n; i++)
+    {
+      Driver d;
+      char *name, *caption;
+
+      if ((cells[i].row == row && cells[i].col == col)
+          || !tm_sheet_is_source (self->sheet, cells[i].row, cells[i].col))
+        continue;
+      d.rho = tm_sim_rank_correlation (sim, cells[i].row, cells[i].col, row, col);
+      if (isnan (d.rho))
+        continue;
+      name = tm_ref_name (cells[i].row, cells[i].col);
+      caption = cell_caption (self->sheet, cells[i].row, cells[i].col);
+      d.label = caption != NULL ? g_strdup_printf ("%s  %s", name, caption) : g_strdup (name);
+      g_free (name);
+      g_free (caption);
+      g_array_append_val (self->drivers, d);
+    }
+  g_free (cells);
+  g_array_sort (self->drivers, compare_drivers);
+  while (self->drivers->len > MAX_DRIVERS)
+    {
+      g_free (g_array_index (self->drivers, Driver, self->drivers->len - 1).label);
+      g_array_set_size (self->drivers, self->drivers->len - 1);
+    }
+}
+
+static void
+draw_tornado (GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer data)
+{
+  TmWindow *self = data;
+  PangoLayout *layout = pango_cairo_create_layout (cr);
+  PangoFontDescription *font = pango_font_description_from_string ("Sans 8.5");
+  double label_w = width * 0.46, axis = label_w + (width - label_w - 40) / 2.0;
+  double half = (width - label_w - 40) / 2.0 - 4;
+  int row_h = 20;
+
+  pango_layout_set_font_description (layout, font);
+  pango_font_description_free (font);
+  pango_layout_set_width (layout, (int) (label_w - 8) * PANGO_SCALE);
+  pango_layout_set_ellipsize (layout, PANGO_ELLIPSIZE_END);
+
+  for (guint i = 0; i < self->drivers->len; i++)
+    {
+      Driver *d = &g_array_index (self->drivers, Driver, i);
+      double y = i * row_h, w = half * fabs (d->rho);
+      char value[16];
+      int tw, th;
+
+      cairo_set_source_rgb (cr, 0.30, 0.32, 0.36);
+      pango_layout_set_text (layout, d->label, -1);
+      pango_layout_get_pixel_size (layout, &tw, &th);
+      cairo_move_to (cr, 0, y + (row_h - th) / 2.0);
+      pango_cairo_show_layout (cr, layout);
+
+      /* Right for inputs that push the output up, left for those that
+       * pull it down. */
+      if (d->rho >= 0)
+        cairo_set_source_rgba (cr, 0.490, 0.360, 0.900, 0.85);
+      else
+        cairo_set_source_rgba (cr, 0.880, 0.380, 0.330, 0.85);
+      cairo_rectangle (cr, d->rho >= 0 ? axis : axis - w, y + 4, w, row_h - 8);
+      cairo_fill (cr);
+
+      g_snprintf (value, sizeof value, "%+.2f", d->rho);
+      pango_layout_set_width (layout, -1);
+      pango_layout_set_text (layout, value, -1);
+      pango_layout_get_pixel_size (layout, &tw, &th);
+      cairo_set_source_rgb (cr, 0.45, 0.47, 0.52);
+      cairo_move_to (cr, width - tw, y + (row_h - th) / 2.0);
+      pango_cairo_show_layout (cr, layout);
+      pango_layout_set_width (layout, (int) (label_w - 8) * PANGO_SCALE);
+    }
+  cairo_set_source_rgb (cr, 0.80, 0.81, 0.84);
+  cairo_set_line_width (cr, 1);
+  cairo_move_to (cr, floor (axis) + 0.5, 0);
+  cairo_line_to (cr, floor (axis) + 0.5, self->drivers->len * row_h);
+  cairo_stroke (cr);
+  g_object_unref (layout);
+}
+
+static void
 update_panel (TmWindow *self)
 {
   TmRange sel;
@@ -203,7 +323,16 @@ update_panel (TmWindow *self)
 
     gtk_widget_set_visible (self->stats_box, have);
     if (have)
+      find_drivers (self, sim, sel.row0, sel.col0);
+    else
+      clear_drivers (self);
+    gtk_widget_set_visible (self->drivers_title, self->drivers->len > 0);
+    gtk_widget_set_visible (self->tornado, self->drivers->len > 0);
+    gtk_widget_set_size_request (self->tornado, -1, 20 * (int) self->drivers->len);
+    gtk_widget_queue_draw (self->tornado);
+    if (have)
       {
+        const char *format = tm_sheet_get_format (self->sheet, sel.row0, sel.col0);
         double values[N_STATS];
         int n, below = 0;
         const double *x = tm_sim_samples (sim, sel.row0, sel.col0, TRUE, &n);
@@ -231,7 +360,7 @@ update_panel (TmWindow *self)
             else if (i == STAT_VALID)
               t = g_strdup_printf ("%d / %d", s.valid, s.iterations);
             else
-              t = format_stat (values[i]);
+              t = format_stat (values[i], i == STAT_SE ? NULL : format);
             gtk_label_set_text (GTK_LABEL (self->stat_values[i]), t);
             g_free (t);
           }
@@ -488,6 +617,7 @@ paste_inputs (TmWindow *self, char **inputs, int rows, int cols, gboolean shift_
   int tile_r = 1, tile_c = 1;
 
   tm_grid_get_selection (TM_GRID (self->grid), &sel);
+  tm_sheet_begin_undo (self->sheet);
   if (tm_range_rows (&sel) % rows == 0 && tm_range_cols (&sel) % cols == 0)
     {
       tile_r = tm_range_rows (&sel) / rows;
@@ -506,6 +636,7 @@ paste_inputs (TmWindow *self, char **inputs, int rows, int cols, gboolean shift_
             tm_sheet_set_input (self->sheet, row, col, moved);
             g_free (moved);
           }
+  tm_sheet_end_undo (self->sheet);
   {
     TmRange done = { sel.row0, sel.col0,
                      sel.row0 + tile_r * rows - 1, sel.col0 + tile_c * cols - 1 };
@@ -534,8 +665,10 @@ on_paste_text (GObject *source, GAsyncResult *result, gpointer data)
       if (self->clip_cut)
         {
           char **inputs = g_strdupv (self->clip_inputs);
+          tm_sheet_begin_undo (self->sheet);
           tm_sheet_clear_range (self->sheet, &self->clip_range);
           paste_inputs (self, inputs, rows, cols, FALSE, 0, 0);
+          tm_sheet_end_undo (self->sheet);
           g_strfreev (inputs);
           clear_clip (self);
         }
@@ -660,10 +793,61 @@ action_recalc (GSimpleAction *a, GVariant *p, gpointer data)
   TmWindow *self = data;
 
   commit_edit (self);
-  tm_sheet_recalc (self->sheet);
+  tm_sheet_redraw (self->sheet);
   tm_grid_refresh (TM_GRID (self->grid));
   update_panel (self);
-  set_status (self, "Recalculated: every uncertain cell drew again.");
+  set_status (self, "Every uncertain cell drew again.");
+}
+
+static void
+action_undo_redo (GSimpleAction *a, GVariant *p, gpointer data)
+{
+  TmWindow *self = data;
+  gboolean undo = strcmp (g_action_get_name (G_ACTION (a)), "undo") == 0;
+
+  commit_edit (self);
+  if (!(undo ? tm_sheet_undo (self->sheet) : tm_sheet_redo (self->sheet)))
+    {
+      set_status (self, undo ? "Nothing to undo." : "Nothing to redo.");
+      return;
+    }
+  sheet_changed (self);
+  update_formula_bar (self);
+  set_status (self, undo ? "Undone." : "Redone.");
+}
+
+static void
+apply_format (TmWindow *self, const char *format)
+{
+  TmRange sel;
+
+  commit_edit (self);
+  tm_grid_get_selection (TM_GRID (self->grid), &sel);
+  tm_sheet_format_range (self->sheet, &sel, format);
+  tm_grid_refresh (TM_GRID (self->grid));
+  update_panel (self);
+  update_title (self);
+}
+
+static void
+action_format (GSimpleAction *a, GVariant *p, gpointer data)
+{
+  apply_format (TM_WINDOW (data), g_variant_get_string (p, NULL));
+}
+
+/* More or fewer decimals, starting from the active cell's format and
+ * applied to the whole selection. */
+static void
+action_decimals (GSimpleAction *a, GVariant *p, gpointer data)
+{
+  TmWindow *self = data;
+  TmRef cur = tm_grid_get_cursor (TM_GRID (self->grid));
+  const char *format = tm_sheet_get_format (self->sheet, cur.row, cur.col);
+  gboolean more = strcmp (g_action_get_name (G_ACTION (a)), "more-decimals") == 0;
+  char *changed = tm_format_change_decimals (format, more ? 1 : -1);
+
+  apply_format (self, changed);
+  g_free (changed);
 }
 
 static void
@@ -1011,6 +1195,11 @@ static const GActionEntry WIN_ACTIONS[] = {
   { "fill-right", action_fill_right, NULL, NULL, NULL, { 0 } },
   { "simulate", action_simulate, NULL, NULL, NULL, { 0 } },
   { "recalc", action_recalc, NULL, NULL, NULL, { 0 } },
+  { "undo", action_undo_redo, NULL, NULL, NULL, { 0 } },
+  { "redo", action_undo_redo, NULL, NULL, NULL, { 0 } },
+  { "format", action_format, "s", NULL, NULL, { 0 } },
+  { "more-decimals", action_decimals, NULL, NULL, NULL, { 0 } },
+  { "fewer-decimals", action_decimals, NULL, NULL, NULL, { 0 } },
   { "functions", action_functions, NULL, NULL, NULL, { 0 } },
   { "about", action_about, NULL, NULL, NULL, { 0 } },
 };
@@ -1062,6 +1251,11 @@ build_menu (void)
 
   m = g_menu_new ();
   section = g_menu_new ();
+  ADD (section, "_Undo", "win.undo", "<Control>z");
+  ADD (section, "_Redo", "win.redo", "<Control>y");
+  g_menu_append_section (m, NULL, G_MENU_MODEL (section));
+  g_object_unref (section);
+  section = g_menu_new ();
   ADD (section, "Cu_t", "win.cut", "<Control>x");
   ADD (section, "_Copy", "win.copy", "<Control>c");
   ADD (section, "_Paste", "win.paste", "<Control>v");
@@ -1074,6 +1268,26 @@ build_menu (void)
   g_menu_append_section (m, NULL, G_MENU_MODEL (section));
   g_object_unref (section);
   g_menu_append_submenu (bar, "_Edit", G_MENU_MODEL (m));
+  g_object_unref (m);
+
+  m = g_menu_new ();
+  section = g_menu_new ();
+  ADD (section, "_General", "win.format::General", NULL);
+  ADD (section, "_Number  1234.57", "win.format::0.00", NULL);
+  ADD (section, "_Thousands  1,235", "win.format::#,##0", NULL);
+  ADD (section, "Thousands and decimals  1,234.57", "win.format::#,##0.00", NULL);
+  ADD (section, "_Currency  $1,235", "win.format::$#,##0", NULL);
+  ADD (section, "_Percent  12%", "win.format::0%", NULL);
+  ADD (section, "Percent, one decimal  12.3%", "win.format::0.0%", NULL);
+  ADD (section, "_Scientific  1.23E+03", "win.format::0.00E+00", NULL);
+  g_menu_append_section (m, NULL, G_MENU_MODEL (section));
+  g_object_unref (section);
+  section = g_menu_new ();
+  ADD (section, "_More Decimals", "win.more-decimals", NULL);
+  ADD (section, "_Fewer Decimals", "win.fewer-decimals", NULL);
+  g_menu_append_section (m, NULL, G_MENU_MODEL (section));
+  g_object_unref (section);
+  g_menu_append_submenu (bar, "F_ormat", G_MENU_MODEL (m));
   g_object_unref (m);
 
   m = g_menu_new ();
@@ -1161,13 +1375,54 @@ build_panel (TmWindow *self)
   self->stats_box = grid;
   gtk_box_append (GTK_BOX (panel), grid);
 
+  self->drivers_title = gtk_label_new ("WHAT DRIVES IT");
+  gtk_widget_add_css_class (self->drivers_title, "panel-heading");
+  gtk_widget_set_halign (self->drivers_title, GTK_ALIGN_START);
+  gtk_widget_set_margin_top (self->drivers_title, 10);
+  gtk_widget_set_tooltip_text (self->drivers_title,
+                               "Rank correlation across the futures between each input and this cell");
+  gtk_box_append (GTK_BOX (panel), self->drivers_title);
+  self->tornado = gtk_drawing_area_new ();
+  gtk_drawing_area_set_draw_func (GTK_DRAWING_AREA (self->tornado), draw_tornado, self, NULL);
+  gtk_box_append (GTK_BOX (panel), self->tornado);
+
   return panel;
+}
+
+static void
+on_close_answer (GObject *source, GAsyncResult *result, gpointer data)
+{
+  TmWindow *self = data;
+  int button = gtk_alert_dialog_choose_finish (GTK_ALERT_DIALOG (source), result, NULL);
+
+  if (button == 1)
+    {
+      self->close_confirmed = TRUE;
+      gtk_window_close (GTK_WINDOW (self));
+    }
+  else if (button == 2)
+    {
+      if (self->path != NULL)
+        {
+          save_to (self, self->path);
+          if (!tm_sheet_modified (self->sheet))
+            {
+              self->close_confirmed = TRUE;
+              gtk_window_close (GTK_WINDOW (self));
+            }
+        }
+      else
+        action_save_as (NULL, NULL, self);
+    }
+  g_object_unref (self);
 }
 
 static gboolean
 on_close_request (GtkWindow *window, gpointer data)
 {
   TmWindow *self = TM_WINDOW (window);
+  GtkAlertDialog *dialog;
+  char *base;
 
   /* Closing mid-simulation would pull the sheet out from under it. */
   if (self->simulating)
@@ -1175,7 +1430,20 @@ on_close_request (GtkWindow *window, gpointer data)
       self->stop_requested = TRUE;
       return TRUE;
     }
-  return FALSE;
+  commit_edit (self);
+  if (self->close_confirmed || !tm_sheet_modified (self->sheet))
+    return FALSE;
+
+  base = self->path != NULL ? g_path_get_basename (self->path) : g_strdup ("Untitled");
+  dialog = gtk_alert_dialog_new ("Save the changes to %s before closing?", base);
+  gtk_alert_dialog_set_detail (dialog, "Changes not saved are lost; the simulation's results are not saved in any case.");
+  gtk_alert_dialog_set_buttons (dialog, (const char *[]) { "Cancel", "Close Without Saving", "Save", NULL });
+  gtk_alert_dialog_set_cancel_button (dialog, 0);
+  gtk_alert_dialog_set_default_button (dialog, 2);
+  gtk_alert_dialog_choose (dialog, window, NULL, on_close_answer, g_object_ref (self));
+  g_object_unref (dialog);
+  g_free (base);
+  return TRUE;
 }
 
 static void
@@ -1184,6 +1452,11 @@ tm_window_dispose (GObject *object)
   TmWindow *self = TM_WINDOW (object);
 
   clear_clip (self);
+  if (self->drivers != NULL)
+    {
+      clear_drivers (self);
+      g_clear_pointer (&self->drivers, g_array_unref);
+    }
   G_OBJECT_CLASS (tm_window_parent_class)->dispose (object);
 }
 
@@ -1214,6 +1487,7 @@ tm_window_init (TmWindow *self)
   GMenuModel *menu;
 
   self->sheet = tm_sheet_new ();
+  self->drivers = g_array_new (FALSE, FALSE, sizeof (Driver));
   g_action_map_add_action_entries (G_ACTION_MAP (self), WIN_ACTIONS,
                                    G_N_ELEMENTS (WIN_ACTIONS), self);
 
@@ -1248,9 +1522,28 @@ tm_window_init (TmWindow *self)
   gtk_box_append (GTK_BOX (toolbar), labelled ("Seed", self->seed_spin));
   {
     GtkWidget *recalc = gtk_button_new_with_label ("Draw again");
-    gtk_widget_set_tooltip_text (recalc, "Recalculate: every uncertain cell draws a new value (F9)");
+    gtk_widget_set_tooltip_text (recalc, "Every uncertain cell draws a new value (F9)");
     gtk_actionable_set_action_name (GTK_ACTIONABLE (recalc), "win.recalc");
     gtk_box_append (GTK_BOX (toolbar), recalc);
+  }
+  {
+    static const struct { const char *label, *action, *tip; } buttons[] = {
+      { "%", "win.format::0%", "Percent" },
+      { "1,000", "win.format::#,##0", "Thousands separated" },
+      { ".0+", "win.more-decimals", "More decimals" },
+      { ".0−", "win.fewer-decimals", "Fewer decimals" },
+    };
+    GtkWidget *group = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+
+    gtk_widget_add_css_class (group, "linked");
+    for (guint i = 0; i < G_N_ELEMENTS (buttons); i++)
+      {
+        GtkWidget *b = gtk_button_new_with_label (buttons[i].label);
+        gtk_widget_set_tooltip_text (b, buttons[i].tip);
+        gtk_actionable_set_detailed_action_name (GTK_ACTIONABLE (b), buttons[i].action);
+        gtk_box_append (GTK_BOX (group), b);
+      }
+    gtk_box_append (GTK_BOX (toolbar), group);
   }
   gtk_box_append (GTK_BOX (self->content), toolbar);
 

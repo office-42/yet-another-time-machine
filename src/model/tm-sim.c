@@ -5,7 +5,7 @@
  */
 
 #include "tm-sim.h"
-#include "tm-eval.h"
+#include "tm-stats.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -14,6 +14,7 @@ typedef struct {
   double *raw;       /* iterations of them */
   double *sorted;    /* the numbers among them, ascending; made on demand */
   int     n_sorted;
+  double *ranks;     /* of raw, when every future gave a number; on demand */
 } Series;
 
 struct _TmSim {
@@ -31,6 +32,7 @@ series_free (gpointer p)
 
   g_free (s->raw);
   g_free (s->sorted);
+  g_free (s->ranks);
   g_free (s);
 }
 
@@ -130,13 +132,6 @@ tm_sim_cells (const TmSim *sim, int *n)
   return refs;
 }
 
-static int
-compare_doubles (const void *a, const void *b)
-{
-  double x = *(const double *) a, y = *(const double *) b;
-  return x < y ? -1 : x > y;
-}
-
 const double *
 tm_sim_samples (TmSim *sim, int row, int col, gboolean sorted, int *n)
 {
@@ -157,10 +152,64 @@ tm_sim_samples (TmSim *sim, int row, int col, gboolean sorted, int *n)
       for (int i = 0; i < sim->iterations; i++)
         if (!isnan (s->raw[i]))
           s->sorted[s->n_sorted++] = s->raw[i];
-      qsort (s->sorted, (size_t) s->n_sorted, sizeof (double), compare_doubles);
+      qsort (s->sorted, (size_t) s->n_sorted, sizeof (double), tm_compare_doubles);
     }
   *n = s->n_sorted;
   return s->sorted;
+}
+
+/* The ranks of a series every future of which is a number, kept, since a
+ * tornado chart asks for the same inputs' ranks again and again. */
+static const double *
+ranks_of (TmSim *sim, Series *s)
+{
+  int n;
+
+  if (s->ranks != NULL)
+    return s->ranks;
+  for (n = 0; n < sim->iterations; n++)
+    if (isnan (s->raw[n]))
+      return NULL;
+  s->ranks = g_new (double, sim->iterations);
+  tm_ranks (s->raw, sim->iterations, s->ranks);
+  return s->ranks;
+}
+
+double
+tm_sim_rank_correlation (TmSim *sim, int row1, int col1, int row2, int col2)
+{
+  Series *a, *b;
+  const double *ra, *rb;
+  double *x, *y, *rx, *ry, rho;
+  int k = 0;
+
+  if (sim == NULL || (a = lookup (sim, row1, col1)) == NULL || (b = lookup (sim, row2, col2)) == NULL)
+    return NAN;
+  ra = ranks_of (sim, a);
+  rb = ranks_of (sim, b);
+  if (ra != NULL && rb != NULL)
+    return tm_correlation (ra, rb, sim->iterations);
+
+  /* Some futures gave no number: rank only those where both did. */
+  x = g_new (double, sim->iterations);
+  y = g_new (double, sim->iterations);
+  for (int i = 0; i < sim->iterations; i++)
+    if (!isnan (a->raw[i]) && !isnan (b->raw[i]))
+      {
+        x[k] = a->raw[i];
+        y[k] = b->raw[i];
+        k++;
+      }
+  rx = g_new (double, MAX (k, 1));
+  ry = g_new (double, MAX (k, 1));
+  tm_ranks (x, k, rx);
+  tm_ranks (y, k, ry);
+  rho = tm_correlation (rx, ry, k);
+  g_free (x);
+  g_free (y);
+  g_free (rx);
+  g_free (ry);
+  return rho;
 }
 
 gboolean

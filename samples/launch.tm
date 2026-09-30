@@ -4,6 +4,27 @@ seed	1
 width	A	230
 width	B	110
 width	C	330
+format	B4	#,##0
+format	B5	0.0%
+format	B6	$0.00
+format	B7	$0.00
+format	B8	$#,##0
+format	B10	0.0%
+format	B12	#,##0
+format	B13	$#,##0
+format	B14	$#,##0
+format	B17	$#,##0
+format	B18	0.0%
+format	B19	$#,##0
+format	B20	$#,##0
+format	B21	$#,##0
+format	B22	$#,##0
+format	B25	+0.00;-0.00
+format	B26	+0.00;-0.00
+format	B27	+0.00;-0.00
+format	B28	+0.00;-0.00
+format	B29	+0.00;-0.00
+format	B30	+0.00;-0.00
 cell	A1	Product launch: will it make money?
 cell	A3	Inputs, each a range not a number
 cell	B3	Draw

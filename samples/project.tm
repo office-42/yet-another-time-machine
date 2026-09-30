@@ -4,6 +4,26 @@ seed	1
 width	A	250
 width	E	110
 width	F	100
+format	E4	0.0
+format	F4	0.0
+format	E5	0.0
+format	F5	0.0
+format	E6	0.0
+format	F6	0.0
+format	E7	0.0
+format	F7	0.0
+format	E8	0.0
+format	F8	0.0
+format	E9	0.0
+format	F9	0.0
+format	E10	0.0
+format	F10	0.0
+format	E11	0.0
+format	F11	0.0
+format	E14	0%
+format	E15	0.0
+format	E16	0.0
+format	E17	0.0
 cell	A1	Project schedule: three-point estimates and the merge bias
 cell	A3	Task
 cell	B3	Optimistic

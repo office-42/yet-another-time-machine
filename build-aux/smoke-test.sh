@@ -218,10 +218,100 @@ near C2 144 0.5
 near C3 4 0
 near C4 150.2 1.5
 
+run 'formats' 'A1 = 1234.5678
+format A1 #,##0.00
+A1
+A2 = -1234.5
+format A2 #,##0.0;(#,##0.0);"nil"
+A2
+A3 = 0
+format A3 #,##0.0;(#,##0.0);"nil"
+A3
+A4 = 12.5%
+A4
+A5 = 1234567
+format A5 0.00E+00
+A5
+'
+want "^A1${tab}1,234.57${tab}"
+want "^A2${tab}(1,234.5)${tab}"
+want "^A3${tab}nil${tab}"
+want "^A4${tab}12.5%${tab}"
+want "^A5${tab}1.23E+06${tab}"
+
+run 'undo and redo' 'A1 = 1
+A2 = =A1*2
+A1 = 5
+A2
+undo
+A2
+redo
+A2
+filldown A2:A4
+A4
+undo
+A4
+'
+want "^A2${tab}10${tab}"
+want "^A2${tab}2${tab}"
+want "^A4${tab}40${tab}=A3\\*2"
+want "^A4${tab}${tab}$"
+
+# A cell's draws are its own: adding a cell does not change another's,
+# only Draw Again does.
+run 'streams' 'draws 3
+A1 = =RAND.NORMAL(0,1)
+A1
+B1 = =RAND.NORMAL(0,1)
+B2 = =RAND.PERT(1,2,3)
+A1
+redraw
+A1
+'
+first=$(awk -F "$tab" '$1 == "A1" { print $2 }' "$out" | sed -n 1p)
+second=$(awk -F "$tab" '$1 == "A1" { print $2 }' "$out" | sed -n 2p)
+third=$(awk -F "$tab" '$1 == "A1" { print $2 }' "$out" | sed -n 3p)
+if [ "$first" != "$second" ] || [ "$first" = "$third" ]; then
+  echo "   FAIL: A1 drew $first, then $second after an edit, then $third" >&2
+  failed=1
+fi
+
+run 'judgment, continued' 'A1 = =LAPLACE(3,10)
+A1
+B1 = 0.9
+B2 = 0.6
+B3 = 0.2
+A2 = =POOL.ODDS(B1:B3)
+A2
+C1 = 1.1
+C2 = 1.4
+C3 = 1.25
+C4 = 2
+C5 = 0.95
+A3 = =REFCLASS(C1:C5,100)
+A3
+A4 = =RAND.METALOG(10,20,60)
+D1 = =SIM.PERCENTILE(A4,0.1)
+D2 = =SIM.PERCENTILE(A4,0.5)
+D3 = =SIM.PERCENTILE(A4,0.9)
+simulate
+D1
+D2
+D3
+'
+near A1 0.3333333333 1e-9
+near A2 0.6 1e-9
+near A3 152 1e-9
+near D1 10 0.3
+near D2 20 0.3
+near D3 60 1.2
+
 # Files: written, read back, and the examples still load and simulate.
 run 'files' 'A1 = Revenue
 B1 = =RAND.PERT(80,100,150)
 C1 = tab	and \ backslash
+D1 = 1234.5
+format D1 $#,##0
 iterations 5000
 seed 9
 save t.tm
@@ -229,10 +319,12 @@ save t.csv
 '
 run 'reload' 'B1
 C1
+D1
 simulate
 ' t.tm
 want "^B1${tab}[0-9.]*${tab}=RAND.PERT(80,100,150)"
 want "^C1${tab}tab${tab}and \\\\ backslash"
+want "^D1${tab}\\\$1,235${tab}"
 want "^simulated 5000 iterations, seed 9"
 
 for f in launch sales retirement project judgment; do
@@ -241,12 +333,14 @@ for f in launch sales retirement project judgment; do
   want "^simulated 10000 iterations"
 done
 
-run 'example figures' 'simulate
-B17
-B18
+run 'example figures' 'Z1 = =B17
+Z2 = =B18
+simulate
+Z1
+Z2
 ' "$samples/launch.tm"
-near B17 190000 30000
-near B18 0.28 0.05
+near Z1 190000 30000
+near Z2 0.28 0.05
 
 if [ "$failed" -ne 0 ]; then
   echo "smoke-test: FAILED" >&2

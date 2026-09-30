@@ -5,6 +5,7 @@
  */
 
 #include "tm-chart.h"
+#include "tm-numfmt.h"
 
 #include <math.h>
 #include <string.h>
@@ -82,6 +83,20 @@ compact (double v, double step)
   }
 }
 
+/* An axis label, as a percentage when the cell is shown as one. */
+static char *
+axis_label (double v, double step, gboolean percent)
+{
+  char *s, *t;
+
+  if (!percent)
+    return compact (v, step);
+  s = compact (v * 100, step * 100);
+  t = g_strconcat (s, "%", NULL);
+  g_free (s);
+  return t;
+}
+
 static void
 text_at (cairo_t *cr, PangoLayout *layout, const char *text, double x, double y,
          double xalign, double yalign)
@@ -107,7 +122,7 @@ draw_message (cairo_t *cr, PangoLayout *layout, int width, int height, const cha
 
 static void
 draw_x_axis (cairo_t *cr, PangoLayout *layout, double lo, double hi,
-             double x0, double x1, double y)
+             double x0, double x1, double y, gboolean percent)
 {
   double step = nice_step (hi - lo, MAX (2, (int) ((x1 - x0) / 70)));
 
@@ -120,7 +135,7 @@ draw_x_axis (cairo_t *cr, PangoLayout *layout, double lo, double hi,
   for (double t = ceil (lo / step) * step; t <= hi + step * 1e-9; t += step)
     {
       double x = x0 + (t - lo) / (hi - lo) * (x1 - x0);
-      char *s = compact (t, step);
+      char *s = axis_label (t, step, percent);
 
       cairo_move_to (cr, x + 0.5, y);
       cairo_line_to (cr, x + 0.5, y + 4);
@@ -189,7 +204,8 @@ draw_histogram (TmChart *self, cairo_t *cr, PangoLayout *layout, int width, int 
       cairo_fill (cr);
     }
 
-  draw_x_axis (cr, layout, lo, hi, x0, x1, y1);
+  draw_x_axis (cr, layout, lo, hi, x0, x1, y1,
+               tm_format_is_percent (tm_sheet_get_format (self->sheet, row, col)));
 
 #define XOF(v) (x0 + ((v) - lo) / (hi - lo) * (x1 - x0))
   if (s.p5 >= lo && s.p5 <= hi)
@@ -266,7 +282,7 @@ point_label (TmSheet *sheet, int row, int col, gboolean across, int heading)
 
 static void
 draw_fan (TmChart *self, cairo_t *cr, PangoLayout *layout, int width, int height,
-          Point *pts, int n)
+          Point *pts, int n, gboolean percent)
 {
   double lo = INFINITY, hi = -INFINITY, step;
   double x0 = MARGIN_L, x1 = width - MARGIN_R, y0 = MARGIN_T, y1 = height - MARGIN_B;
@@ -296,7 +312,7 @@ draw_fan (TmChart *self, cairo_t *cr, PangoLayout *layout, int width, int height
   for (double t = lo; t <= hi + step * 1e-9; t += step)
     {
       double y = floor (YOF (t)) + 0.5;
-      char *s = compact (t, step);
+      char *s = axis_label (t, step, percent);
 
       set_rgb (cr, RULE, 1);
       cairo_move_to (cr, x0, y);
@@ -466,7 +482,8 @@ draw (TmChart *self, cairo_t *cr, int width, int height)
             }
         }
       if (simulated > 0)
-        draw_fan (self, cr, layout, width, height, pts, n);
+        draw_fan (self, cr, layout, width, height, pts, n,
+                  tm_format_is_percent (tm_sheet_get_format (self->sheet, r->row1, r->col1)));
       else
         draw_message (cr, layout, width, height,
                       sim == NULL ? "Press F5 to run the simulation."

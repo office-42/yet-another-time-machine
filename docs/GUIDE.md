@@ -4,8 +4,11 @@
 
 - **Toolbar.** **▶ Simulate** (F5) runs the model through as many futures
   as **Futures** says, starting from **Seed**; the same seed always gives
-  the same futures. **Draw again** (F9) recalculates, so every uncertain
-  cell draws a new value, just as Excel's F9 re-rolls `RAND()`.
+  the same futures. **Draw again** (F9) makes every uncertain cell draw a
+  new value. Unlike Excel, typing does not re-roll the draws: each
+  uncertain cell keeps its draw until you press F9. The **%**, **1,000**,
+  **.0+** and **.0−** buttons format the selection as a percentage, with
+  thousands separated, or with more or fewer decimals.
 - **Formula bar.** The name box on the left shows the selected cell. Type
   a cell or range there (`B14`, `B11:AA11`) to go to it. The long box
   shows what the cell holds, and you can edit it there.
@@ -22,7 +25,14 @@
 
   Under the chart are the mean, standard deviation, standard error of the
   mean, minimum, maximum, P5, P25, median, P75, P95 and the chance the
-  cell is below zero.
+  cell is below zero, in the cell's own number format.
+
+  **What drives it** is a tornado chart. It ranks the model's inputs
+  (the cells whose own formulas draw at random) by how strongly the
+  selected cell moves with each of them across the futures, measured as
+  Spearman's rank correlation. Bars to the right push the result up and
+  bars to the left pull it down. The longest bars mark the inputs worth
+  measuring better.
 
 ## Typing
 
@@ -38,6 +48,7 @@
 | Ctrl+Home | go to A1 |
 | Ctrl+A | select the used range |
 | Delete | clear the selection |
+| Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) | undo / redo |
 | Ctrl+C / Ctrl+X / Ctrl+V | copy / cut / paste |
 | Ctrl+D / Ctrl+R | fill down / fill right from the first row / column |
 | F5 | simulate |
@@ -54,6 +65,25 @@ repeats it across the whole selection.
 Drag the line between two column headers to resize a column; double-click
 it to put the column back to its default width.
 
+## Number formats
+
+**Format** sets how numbers are shown. The format belongs to the cell,
+not to what is in it. The codes are Excel's:
+
+| Code | 1234.567 shows as |
+|---|---|
+| `0.00` | 1234.57 |
+| `#,##0` | 1,235 |
+| `$#,##0` | $1,235 |
+| `0.0%` | 123456.7% (0.1234 shows as 12.3%) |
+| `0.00E+00` | 1.23E+03 |
+| `0.0 "days"` | 1234.6 days |
+| `#,##0;(#,##0);"-"` | 1,235, negatives in brackets, zero as a dash |
+
+Typing `12%` into a cell with no format of its own formats it as a
+percentage. Copying and filling carry formats along. A number too wide
+for its column shows as `###`.
+
 ## The formula language
 
 Operators, loosest first: comparison `= <> < > <= >=`, `&`, `+ -`,
@@ -69,7 +99,8 @@ families are:
 - **Processes**: `RAND.GBM`.
 - **Simulation** (`SIM.*`): statistics over the last simulation's futures.
 - **Forecasting**: regression, exponential smoothing, growth.
-- **Judgment**: `BAYES`, `EXTREMIZE`, `BRIER`, `LOGSCORE`.
+- **Judgment**: `BAYES`, `EXTREMIZE`, `POOL.ODDS`, `LAPLACE`, `REFCLASS`,
+  `BRIER`, `LOGSCORE`.
 - **Statistics**, **Distributions**, **Maths**, **Logic**, **Text**,
   **Lookup** and **Finance**: the ordinary spreadsheet functions,
   behaving as Excel's do.
@@ -84,6 +115,7 @@ timemachine 1
 iterations	10000
 seed	1
 width	A	230
+format	B4	#,##0
 cell	A4	Market size (units a year)
 cell	B4	=RAND.LOGCI(80000,300000)
 ```
@@ -112,12 +144,15 @@ commands from standard input:
 | `histogram B1 [bins]` | the futures drawn as a histogram in text |
 | `fan B1:M1` | P5, P25, P50, P75 and P95 cell by cell |
 | `iterations N`, `seed N` | simulation settings |
+| `format A1:B9 0.0%` | set a number format; no code means General |
+| `undo`, `redo` | undo and redo |
+| `redraw` | Draw again: the next draw from every random cell |
 | `draws N` | seed the draws that ordinary recalculation makes |
 | `filldown A1:A9`, `fillright A1:F1` | fill |
 | `copy A1:B2 D1`, `clear A1:B2` | copy (moving references) and clear |
 | `load FILE`, `save FILE`, `export FILE` | files; `export` writes the samples |
 | `functions` | every function with its syntax and a line of help |
-| `recalc` | draw again |
+| `recalc` | work every formula out again, keeping the draws |
 
 ## Running headless
 

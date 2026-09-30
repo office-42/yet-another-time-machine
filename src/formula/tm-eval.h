@@ -13,6 +13,7 @@
 
 #include "tm-formula.h"
 #include "tm-rng.h"
+#include "tm-stats.h"
 
 G_BEGIN_DECLS
 
@@ -113,9 +114,6 @@ typedef struct {
 void     tm_criteria_parse (const TmValue *criteria, TmCriteria *out);
 gboolean tm_criteria_match (const TmCriteria *criteria, const TmValue *value);
 void     tm_criteria_clear (TmCriteria *criteria);
-
-/* PERCENTILE.INC on a sorted array. */
-double   tm_percentile_sorted (const double *sorted, int n, double p);
 
 /* The libraries, one table each, in tm-fn-*.c. */
 extern const TmFunction tm_fn_core[];

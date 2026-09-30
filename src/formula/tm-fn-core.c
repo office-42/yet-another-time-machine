@@ -12,13 +12,6 @@
 
 #include <string.h>
 
-int
-tm_compare_doubles (const void *a, const void *b)
-{
-  double x = *(const double *) a, y = *(const double *) b;
-  return x < y ? -1 : x > y;
-}
-
 /* ---- Arithmetic ------------------------------------------------------- */
 
 static TmValue

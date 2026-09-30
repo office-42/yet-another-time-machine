@@ -18,7 +18,8 @@ built the way it is.
     formula/   TmNode (parser), tm_eval, the function library
       |
       v
-    util/      TmRef/TmRange, TmValue, TmRng (random numbers)
+    util/      TmRef/TmRange, TmValue, TmRng (random numbers),
+               number formats, shared statistics
 ```
 
 Dependencies point downwards. `formula/` does not know what a sheet is: it
@@ -60,10 +61,31 @@ A sample is the cell's number, TRUE as 1 and FALSE as 0 (so the mean of
 `=B14<0` is a probability), or NaN. Sorted copies are made lazily for
 percentiles.
 
-The same seed gives the same futures, because the whole run draws from
-one xoshiro256** stream in a fixed order. The cost is that editing one
-uncertain cell can change the draws of the cells after it. Per-cell
-streams would fix that; see ROADMAP.md.
+Every random cell has a random stream of its own. The stream is a
+xoshiro256** generator seeded from a hash of three things: the seed, the
+cell's position, and the number of the draw (the future being simulated,
+or how many times **Draw again** has been pressed). Nothing else goes
+into it. This has three consequences:
+
+- The same seed gives the same futures, whatever order cells are worked
+  out in.
+- Editing one cell does not change any other cell's draws. Typing no
+  longer re-rolls the whole sheet, as it does in Excel; only F9 does.
+- Two versions of a model, run with the same seed, see the same futures
+  (*common random numbers*). The difference between their results is
+  then the change, not the luck of the draw.
+
+A formula that draws more than once, such as
+`=RAND.NORMAL(0,1)+RAND.NORMAL(0,1)`, takes its draws one after another
+from its cell's stream.
+
+## Undo
+
+Every change to a cell's contents or format goes through one function,
+which records what the cell held before. Changes are grouped: one paste,
+one fill or one clear is undone as a single step, however many cells it
+touched. Undoing a group applies it backwards and records its inverse
+for redo.
 
 ## Values and errors
 

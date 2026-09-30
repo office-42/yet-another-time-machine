@@ -20,18 +20,20 @@ What exists, and what comes next, roughly in order.
 - Window: grid, formula bar, fill, copy and paste, column widths,
   histogram and fan chart, `.tm` and CSV files, sample export, and
   headless screenshots.
+- Undo and redo, grouped by operation.
+- Number formats (Excel's codes, with sections), a Format menu and
+  toolbar buttons.
+- A tornado chart of what drives the selected cell.
+- Per-cell random streams: editing one cell does not change the others'
+  draws, and runs with the same seed share their futures (common random
+  numbers).
+- More judgment: `LAPLACE`, `POOL.ODDS`, `REFCLASS`, and `RAND.METALOG`
+  from three percentiles.
+- A prompt to save changes on closing.
 - Terminal front-end and smoke test; CI on Linux.
 
 ## Next
 
-- **Undo and redo.**
-- **Number formats** (`0.0%`, `#,##0`) so that draws are not shown to ten
-  decimal places.
-- **Tornado chart** in the forecast panel: each input's rank correlation
-  with the selected output, as bars.
-- **Per-cell random streams**, so that editing one input does not change
-  every other input's draws. This gives *common random numbers*: two
-  versions of a model can then be compared futures-for-futures.
 - **Latin hypercube sampling**, for smaller simulation error at the same
   number of futures.
 - **Correlated inputs**, through the Iman–Conover rank reordering.
@@ -39,9 +41,8 @@ What exists, and what comes next, roughly in order.
   simple exponential smoothing, the naive, seasonal naive and drift
   benchmarks, AR(1) mean reversion, logistic and Bass diffusion curves,
   and block bootstrap of a series.
-- **More judgment**: Laplace's rule of succession, Beta-binomial base
-  rates, reference-class uplift, geometric mean of odds, Gott's rule,
-  metalog distributions from three quantiles, and calibration tables.
+- **More judgment**: Beta-binomial base rates, Gott's rule, and
+  calibration tables.
 - **Convergence**: stopping automatically once the chosen statistics are
   known to a tolerance.
 - **In-cell editing and point mode** (clicking cells while typing a

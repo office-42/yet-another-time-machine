@@ -40,6 +40,11 @@ TmRef   *tm_sim_cells      (const TmSim *sim, int *n);
  * sorted, only the numbers, ascending.  NULL if the cell was not kept. */
 const double *tm_sim_samples (TmSim *sim, int row, int col, gboolean sorted, int *n);
 
+/* Spearman's rank correlation between two cells across the futures:
+ * how much one moves with the other.  NaN if either was not kept or does
+ * not vary. */
+double   tm_sim_rank_correlation (TmSim *sim, int row1, int col1, int row2, int col2);
+
 typedef struct {
   int    iterations;
   int    valid;          /* iterations that gave a number */

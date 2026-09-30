@@ -9,6 +9,8 @@ tm_core_sources = files(
   'util/tm-types.c',
   'util/tm-rng.c',
   'util/tm-value.c',
+  'util/tm-stats.c',
+  'util/tm-numfmt.c',
   'formula/tm-formula.c',
   'formula/tm-eval.c',
   'formula/tm-fn-core.c',

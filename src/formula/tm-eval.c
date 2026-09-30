@@ -295,27 +295,6 @@ tm_criteria_clear (TmCriteria *criteria)
   tm_value_clear (&criteria->value);
 }
 
-double
-tm_percentile_sorted (const double *sorted_values, int n, double p)
-{
-  double h, lo;
-  int i;
-
-  if (n <= 0)
-    return NAN;
-  if (n == 1 || p <= 0)
-    return sorted_values[0];
-  if (p >= 1)
-    return sorted_values[n - 1];
-  /* PERCENTILE.INC: rank (n - 1) p, interpolated between neighbours. */
-  h = (n - 1) * p;
-  lo = floor (h);
-  i = (int) lo;
-  if (i + 1 >= n)
-    return sorted_values[n - 1];
-  return sorted_values[i] + (h - lo) * (sorted_values[i + 1] - sorted_values[i]);
-}
-
 /* ---- Evaluation ------------------------------------------------------- */
 
 static TmValue

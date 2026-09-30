@@ -754,3 +754,30 @@ tm_formula_foreach_range (const TmNode *node, const char *prefix,
   if (node != NULL)
     foreach_range (node, prefix, prefix == NULL, func, data);
 }
+
+gboolean
+tm_formula_calls (const TmNode *n, guint flags)
+{
+  if (n == NULL)
+    return FALSE;
+  switch (n->type)
+    {
+    case TM_NODE_NEGATE:
+    case TM_NODE_PLUS:
+    case TM_NODE_PERCENT:
+    case TM_NODE_PAREN:
+      return tm_formula_calls (n->as.arg, flags);
+    case TM_NODE_BINARY:
+      return tm_formula_calls (n->as.binary.left, flags)
+             || tm_formula_calls (n->as.binary.right, flags);
+    case TM_NODE_CALL:
+      if (n->as.call.fn != NULL && (n->as.call.fn->flags & flags))
+        return TRUE;
+      for (int i = 0; i < n->as.call.n_args; i++)
+        if (tm_formula_calls (n->as.call.args[i], flags))
+          return TRUE;
+      return FALSE;
+    default:
+      return FALSE;
+    }
+}

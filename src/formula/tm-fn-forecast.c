@@ -873,6 +873,104 @@ fn_extremize (TmEvalContext *ctx, TmArg *args, int n)
   return tm_value_number (x / (x + y));
 }
 
+/* Laplace's rule of succession: after s successes in n tries, the chance
+ * of success next time is (s + 1) / (n + 2) -- which, unlike s / n, is
+ * neither certain after one success nor impossible before the first. */
+static TmValue
+fn_laplace (TmEvalContext *ctx, TmArg *args, int n)
+{
+  TmValue err;
+  double s, trials;
+
+  ARG_NUM (0, s);
+  ARG_NUM (1, trials);
+  if (s < 0 || trials < s)
+    return tm_value_error (TM_ERR_NUM);
+  return tm_value_number ((s + 1) / (trials + 2));
+}
+
+/* The forecasters' probabilities pooled by the (weighted) geometric mean
+ * of their odds: an average of log-odds, which, unlike the plain average,
+ * lets a confident forecaster's 1% count for what it says. */
+static TmValue
+fn_pool_odds (TmEvalContext *ctx, TmArg *args, int n)
+{
+  int np, nw = 0;
+  const TmValue **p = tm_arg_cells (ctx, &args[0], &np);
+  const TmValue **w = HAS_ARG (1) ? tm_arg_cells (ctx, &args[1], &nw) : NULL;
+  double sum = 0, total = 0;
+  TmValue r;
+
+  if (w != NULL && nw != np)
+    r = tm_value_error (TM_ERR_NA);
+  else
+    {
+      r = tm_value_error (TM_ERR_DIV0);
+      for (int i = 0; i < np; i++)
+        {
+          double q, weight = 1;
+
+          if (p[i]->type == TM_VALUE_ERROR)
+            {
+              r = tm_value_copy (p[i]);
+              total = -1;
+              break;
+            }
+          if (p[i]->type != TM_VALUE_NUMBER)
+            continue;
+          q = p[i]->as.number;
+          if (q < 0 || q > 1)
+            {
+              r = tm_value_error (TM_ERR_NUM);
+              total = -1;
+              break;
+            }
+          if (w != NULL)
+            {
+              if (w[i]->type != TM_VALUE_NUMBER || w[i]->as.number < 0)
+                continue;
+              weight = w[i]->as.number;
+            }
+          q = CLAMP (q, 1e-6, 1 - 1e-6);
+          sum += weight * log (q / (1 - q));
+          total += weight;
+        }
+      if (total > 0)
+        r = tm_value_number (1 / (1 + exp (-sum / total)));
+    }
+  g_free (p);
+  g_free (w);
+  return r;
+}
+
+/* Reference-class forecasting, after Kahneman and Tversky's outside view
+ * and Flyvbjerg's practice: the estimate scaled by the ratio of actual to
+ * estimated that projects like it reached with probability p. */
+static TmValue
+fn_refclass (TmEvalContext *ctx, TmArg *args, int n)
+{
+  TmValue err;
+  GArray *a;
+  double estimate, p, q;
+
+  ARG_NUM (1, estimate);
+  OPT_NUM (2, p, 0.8);
+  if (p < 0 || p > 1)
+    return tm_value_error (TM_ERR_NUM);
+  a = collect (ctx, args, 1, &err);
+  if (a == NULL)
+    return err;
+  if (a->len == 0)
+    {
+      g_array_free (a, TRUE);
+      return tm_value_error (TM_ERR_NUM);
+    }
+  qsort (a->data, a->len, sizeof (double), tm_compare_doubles);
+  q = tm_percentile_sorted ((double *) a->data, (int) a->len, p);
+  g_array_free (a, TRUE);
+  return tm_value_number (estimate * q);
+}
+
 const TmFunction tm_fn_forecast[] = {
   FN ("SLOPE", 2, 2, fn_slope, 0, F, "SLOPE(known_y, known_x)", "The slope of the least-squares line."),
   FN ("INTERCEPT", 2, 2, fn_intercept, 0, F, "INTERCEPT(known_y, known_x)", "Where the least-squares line crosses x = 0."),
@@ -894,5 +992,8 @@ const TmFunction tm_fn_forecast[] = {
   FN ("LOGSCORE", 2, 2, fn_logscore, 0, J, "LOGSCORE(probabilities, outcomes)", "Mean negative log likelihood of what happened: lower is better."),
   FN ("BAYES", 3, 3, fn_bayes, 0, J, "BAYES(prior, p_if_true, p_if_false)", "The probability after seeing the evidence."),
   FN ("EXTREMIZE", 1, 2, fn_extremize, 0, J, "EXTREMIZE(p, [a])", "A crowd's average probability, made bolder."),
+  FN ("LAPLACE", 2, 2, fn_laplace, 0, J, "LAPLACE(successes, trials)", "The chance of success next time: (s + 1) / (n + 2)."),
+  FN ("POOL.ODDS", 1, 2, fn_pool_odds, 0, J, "POOL.ODDS(probabilities, [weights])", "Forecasters pooled by the geometric mean of their odds."),
+  FN ("REFCLASS", 2, 3, fn_refclass, 0, J, "REFCLASS(ratios, estimate, [p])", "The estimate scaled by past actual/estimate ratios at p (80%)."),
 };
 const int tm_fn_forecast_count = G_N_ELEMENTS (tm_fn_forecast);

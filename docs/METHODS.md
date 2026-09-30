@@ -39,6 +39,14 @@ care about.
 | "about 4 a month, at random" | `=RAND.POISSON(4)` |
 | "one of these, this likely" | `=RAND.DISCRETE(A1:A3,B1:B3)` |
 | "like one of the months we've had" | `=RAND.BOOTSTRAP(B4:B39)` |
+| "P10 is 10, P50 is 20, P90 is 60" (skewed) | `=RAND.METALOG(10,20,60)` |
+
+**Comparing two versions of a model.** Each uncertain cell draws from a
+stream of its own, fixed by the seed and the cell's position. So running
+a model, changing a decision, and running it again with the same seed
+puts both versions through the *same* futures (common random numbers).
+The difference between them is then the effect of the decision, not the
+luck of the draw.
 
 **How many futures?** The error in a simulated mean shrinks as one over
 the square root of the number of futures. Four times as many halves it.
@@ -74,9 +82,19 @@ writing a judgment down are better than others.
   maximum. PERT's mean, (min + 4·likely + max)/6, leans on the most likely
   value less than a triangle's mean does. Project planners have used it
   since the 1950s.
+- **Three percentiles** (`RAND.METALOG(p10, p50, p90)`): Keelin's metalog
+  distribution. It fits the three quantiles exactly and can lean either
+  way, with no hard minimum or maximum, which experts are poor at giving
+  anyway. A triple that no distribution fits gives `#NUM!`.
 - **The outside view first.** Before you estimate how long *this* project
   will take, look at how long projects *like* it took (a reference class).
   Start from that base rate and adjust for what is special about this one.
+  `REFCLASS(ratios, estimate, 80%)` does Flyvbjerg's version: it scales
+  your estimate by the ratio of actual to estimated that 80% of past
+  projects stayed within.
+- **Small numbers** (`LAPLACE(successes, trials)`). After 0 failures in 10
+  launches, the chance of failure next time is not 0. Laplace's rule of
+  succession says 1/12.
 
 ## 3. Extrapolating from history
 
@@ -129,7 +147,11 @@ and keeping score.
   piece of evidence should move a probability. A bad status report that
   turns up 80% of the time when a project is slipping and 20% of the time
   when it isn't moves a 30% chance of slipping to 63%.
-- **Pooling and extremizing** (`EXTREMIZE(p, a)`). The average of several
+- **Pooling** (`POOL.ODDS(probabilities, [weights])`). Combine
+  forecasters by the geometric mean of their odds, not the average of
+  their probabilities. Then a confident forecaster's 2% counts for what it
+  says instead of being averaged away.
+- **Extremizing** (`EXTREMIZE(p, a)`). The average of several
   forecasters' probabilities is too timid, because each of them knows
   only part of what the group knows. Pushing it away from 50% (with *a*
   around 2 to 2.5) scored better in the Good Judgment tournaments.
@@ -147,9 +169,10 @@ and keeping score.
   negative: a loss, a shortfall, a deficit.
 - **Expected shortfall** (`SIM.TAILMEAN(cell, 5%)`) tells you how bad the
   worst 5% of futures are on average, not just where they start.
-- **What drives the result** (`SIM.CORREL(input, output)`) is the rank
-  correlation across the futures. The inputs with the largest values are
-  the ones worth measuring better. Values smaller than about ±0.02 are
-  noise.
+- **What drives the result.** The forecast panel's tornado chart ranks
+  the inputs by the rank correlation between each of them and the selected
+  cell across the futures. `SIM.CORREL(input, output)` puts the same
+  figure in a cell. The inputs with the largest values are the ones worth
+  measuring better. Values smaller than about ±0.02 are noise.
 - **Stale results.** The panel says so when the sheet has changed since
   the last simulation. Press F5 again.
