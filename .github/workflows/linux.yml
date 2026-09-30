@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: Linux
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'docs/**', 'LICENSE']
+  pull_request:
+    branches: [main]
+    paths-ignore: ['**.md', 'docs/**', 'LICENSE']
+  workflow_dispatch:
+
+concurrency:
+  group: linux-${{ github.ref }}
+  cancel-in-progress: true
+
+# Nothing here writes to the repository.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc pkg-config meson ninja-build \
+            libgtk-4-dev libpango1.0-dev libcairo2-dev libglib2.0-dev \
+            desktop-file-utils
+
+      - name: Configure
+        run: meson setup builddir --werror
+
+      - name: Build
+        run: meson compile -C builddir
+
+      - name: Smoke test
+        run: sh build-aux/smoke-test.sh builddir/src/timemachine-calc
+
+      - name: Validate the desktop entry
+        run: desktop-file-validate data/net.office42.timemachine.desktop
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: timemachine-linux
+          path: |
+            builddir/src/timemachine
+            builddir/src/timemachine-calc
+          retention-days: 14

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Time Machine
+GenericName=Forecasting Spreadsheet
+Comment=Make predictions about the future with Monte Carlo simulation
+Exec=timemachine %F
+Icon=net.office42.timemachine
+Terminal=false
+Categories=Office;Spreadsheet;
+Keywords=forecast;prediction;monte carlo;simulation;spreadsheet;risk;
+MimeType=text/csv;
+StartupNotify=true

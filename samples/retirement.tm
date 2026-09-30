@@ -1,0 +1,107 @@
+timemachine 1
+iterations	10000
+seed	1
+width	A	190
+cell	A1	Retirement savings: a random walk through 25 years of markets
+cell	A3	Savings today
+cell	B3	100000
+cell	A4	Saved each year
+cell	B4	12000
+cell	A5	Expected return (real)
+cell	B5	5%
+cell	A6	Volatility
+cell	B6	15%
+cell	A7	Goal
+cell	B7	1000000
+cell	A9	Year
+cell	B9	0
+cell	C9	=B9+1
+cell	D9	=C9+1
+cell	E9	=D9+1
+cell	F9	=E9+1
+cell	G9	=F9+1
+cell	H9	=G9+1
+cell	I9	=H9+1
+cell	J9	=I9+1
+cell	K9	=J9+1
+cell	L9	=K9+1
+cell	M9	=L9+1
+cell	N9	=M9+1
+cell	O9	=N9+1
+cell	P9	=O9+1
+cell	Q9	=P9+1
+cell	R9	=Q9+1
+cell	S9	=R9+1
+cell	T9	=S9+1
+cell	U9	=T9+1
+cell	V9	=U9+1
+cell	W9	=V9+1
+cell	X9	=W9+1
+cell	Y9	=X9+1
+cell	Z9	=Y9+1
+cell	AA9	=Z9+1
+cell	A10	Market return
+cell	C10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	D10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	E10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	F10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	G10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	H10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	I10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	J10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	K10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	L10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	M10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	N10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	O10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	P10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	Q10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	R10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	S10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	T10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	U10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	V10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	W10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	X10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	Y10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	Z10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	AA10	=EXP(RAND.NORMAL($B$5-$B$6^2/2,$B$6))-1
+cell	A11	Savings
+cell	B11	=B3
+cell	C11	=B11*(1+C10)+$B$4
+cell	D11	=C11*(1+D10)+$B$4
+cell	E11	=D11*(1+E10)+$B$4
+cell	F11	=E11*(1+F10)+$B$4
+cell	G11	=F11*(1+G10)+$B$4
+cell	H11	=G11*(1+H10)+$B$4
+cell	I11	=H11*(1+I10)+$B$4
+cell	J11	=I11*(1+J10)+$B$4
+cell	K11	=J11*(1+K10)+$B$4
+cell	L11	=K11*(1+L10)+$B$4
+cell	M11	=L11*(1+M10)+$B$4
+cell	N11	=M11*(1+N10)+$B$4
+cell	O11	=N11*(1+O10)+$B$4
+cell	P11	=O11*(1+P10)+$B$4
+cell	Q11	=P11*(1+Q10)+$B$4
+cell	R11	=Q11*(1+R10)+$B$4
+cell	S11	=R11*(1+S10)+$B$4
+cell	T11	=S11*(1+T10)+$B$4
+cell	U11	=T11*(1+U10)+$B$4
+cell	V11	=U11*(1+V10)+$B$4
+cell	W11	=V11*(1+W10)+$B$4
+cell	X11	=W11*(1+X10)+$B$4
+cell	Y11	=X11*(1+Y10)+$B$4
+cell	Z11	=Y11*(1+Z10)+$B$4
+cell	AA11	=Z11*(1+AA10)+$B$4
+cell	A13	After F5 (select B11:AA11 for the fan):
+cell	A14	Chance of reaching the goal
+cell	B14	=SIM.PROB(AA11,">="&B7)
+cell	A15	Median outcome
+cell	B15	=SIM.MEDIAN(AA11)
+cell	A16	Bad luck (P10)
+cell	B16	=SIM.PERCENTILE(AA11,0.1)
+cell	A17	Good luck (P90)
+cell	B17	=SIM.PERCENTILE(AA11,0.9)
+cell	A18	With no volatility
+cell	B18	=FV(B5,25,-B4,-B3)
+cell	C18	the straight-line plan

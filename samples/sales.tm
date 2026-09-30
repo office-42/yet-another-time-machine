@@ -1,0 +1,194 @@
+timemachine 1
+iterations	10000
+seed	1
+width	A	70
+width	B	90
+width	C	110
+width	D	90
+width	E	120
+width	G	250
+width	H	110
+cell	A1	Monthly sales: three years of history, one year of forecast
+cell	A3	Month
+cell	B3	Sales
+cell	C3	Forecast (ETS)
+cell	D3	± 95%
+cell	E3	History & a future
+cell	G3	What the smoothing found
+cell	A4	1
+cell	B4	1005
+cell	E4	=B4
+cell	G4	Season length (months)
+cell	H4	=FORECAST.ETS.SEASONALITY(B4:B39,A4:A39)
+cell	A5	2
+cell	B5	1125
+cell	E5	=B5
+cell	G5	Last year's sales
+cell	H5	=SUM(B28:B39)
+cell	A6	3
+cell	B6	1166
+cell	E6	=B6
+cell	G6	Next year, point forecast
+cell	H6	=SUM(C40:C51)
+cell	A7	4
+cell	B7	1197
+cell	E7	=B7
+cell	G7	Next year, one future
+cell	H7	=SUM(E40:E51)
+cell	A8	5
+cell	B8	1168
+cell	E8	=B8
+cell	G8	Growth, point forecast
+cell	H8	=H6/H5-1
+cell	A9	6
+cell	B9	1156
+cell	E9	=B9
+cell	A10	7
+cell	B10	1149
+cell	E10	=B10
+cell	G10	After F5:
+cell	A11	8
+cell	B11	1062
+cell	E11	=B11
+cell	G11	Chance next year beats 20,000
+cell	H11	=SIM.PROB(H7,">20000")
+cell	A12	9
+cell	B12	1047
+cell	E12	=B12
+cell	G12	Next year, P10
+cell	H12	=SIM.PERCENTILE(H7,0.1)
+cell	A13	10
+cell	B13	1010
+cell	E13	=B13
+cell	G13	Next year, P90
+cell	H13	=SIM.PERCENTILE(H7,0.9)
+cell	A14	11
+cell	B14	1051
+cell	E14	=B14
+cell	A15	12
+cell	B15	1112
+cell	E15	=B15
+cell	G15	Select E4:E51 for the fan chart:
+cell	A16	13
+cell	B16	1128
+cell	E16	=B16
+cell	G16	history as a line, the forecast as a fan.
+cell	A17	14
+cell	B17	1319
+cell	E17	=B17
+cell	G17	Each month is drawn on its own, so the
+cell	A18	15
+cell	B18	1375
+cell	E18	=B18
+cell	G18	annual spread is if anything too narrow.
+cell	A19	16
+cell	B19	1410
+cell	E19	=B19
+cell	A20	17
+cell	B20	1317
+cell	E20	=B20
+cell	A21	18
+cell	B21	1275
+cell	E21	=B21
+cell	A22	19
+cell	B22	1249
+cell	E22	=B22
+cell	A23	20
+cell	B23	1206
+cell	E23	=B23
+cell	A24	21
+cell	B24	1197
+cell	E24	=B24
+cell	A25	22
+cell	B25	1178
+cell	E25	=B25
+cell	A26	23
+cell	B26	1236
+cell	E26	=B26
+cell	A27	24
+cell	B27	1259
+cell	E27	=B27
+cell	A28	25
+cell	B28	1387
+cell	E28	=B28
+cell	A29	26
+cell	B29	1481
+cell	E29	=B29
+cell	A30	27
+cell	B30	1508
+cell	E30	=B30
+cell	A31	28
+cell	B31	1639
+cell	E31	=B31
+cell	A32	29
+cell	B32	1587
+cell	E32	=B32
+cell	A33	30
+cell	B33	1573
+cell	E33	=B33
+cell	A34	31
+cell	B34	1440
+cell	E34	=B34
+cell	A35	32
+cell	B35	1375
+cell	E35	=B35
+cell	A36	33
+cell	B36	1351
+cell	E36	=B36
+cell	A37	34
+cell	B37	1356
+cell	E37	=B37
+cell	A38	35
+cell	B38	1420
+cell	E38	=B38
+cell	A39	36
+cell	B39	1475
+cell	E39	=B39
+cell	A40	37
+cell	C40	=FORECAST.ETS(A40,$B$4:$B$39,$A$4:$A$39)
+cell	D40	=FORECAST.ETS.CONFINT(A40,$B$4:$B$39,$A$4:$A$39)
+cell	E40	=RAND.ETS(A40,$B$4:$B$39,$A$4:$A$39)
+cell	A41	38
+cell	C41	=FORECAST.ETS(A41,$B$4:$B$39,$A$4:$A$39)
+cell	D41	=FORECAST.ETS.CONFINT(A41,$B$4:$B$39,$A$4:$A$39)
+cell	E41	=RAND.ETS(A41,$B$4:$B$39,$A$4:$A$39)
+cell	A42	39
+cell	C42	=FORECAST.ETS(A42,$B$4:$B$39,$A$4:$A$39)
+cell	D42	=FORECAST.ETS.CONFINT(A42,$B$4:$B$39,$A$4:$A$39)
+cell	E42	=RAND.ETS(A42,$B$4:$B$39,$A$4:$A$39)
+cell	A43	40
+cell	C43	=FORECAST.ETS(A43,$B$4:$B$39,$A$4:$A$39)
+cell	D43	=FORECAST.ETS.CONFINT(A43,$B$4:$B$39,$A$4:$A$39)
+cell	E43	=RAND.ETS(A43,$B$4:$B$39,$A$4:$A$39)
+cell	A44	41
+cell	C44	=FORECAST.ETS(A44,$B$4:$B$39,$A$4:$A$39)
+cell	D44	=FORECAST.ETS.CONFINT(A44,$B$4:$B$39,$A$4:$A$39)
+cell	E44	=RAND.ETS(A44,$B$4:$B$39,$A$4:$A$39)
+cell	A45	42
+cell	C45	=FORECAST.ETS(A45,$B$4:$B$39,$A$4:$A$39)
+cell	D45	=FORECAST.ETS.CONFINT(A45,$B$4:$B$39,$A$4:$A$39)
+cell	E45	=RAND.ETS(A45,$B$4:$B$39,$A$4:$A$39)
+cell	A46	43
+cell	C46	=FORECAST.ETS(A46,$B$4:$B$39,$A$4:$A$39)
+cell	D46	=FORECAST.ETS.CONFINT(A46,$B$4:$B$39,$A$4:$A$39)
+cell	E46	=RAND.ETS(A46,$B$4:$B$39,$A$4:$A$39)
+cell	A47	44
+cell	C47	=FORECAST.ETS(A47,$B$4:$B$39,$A$4:$A$39)
+cell	D47	=FORECAST.ETS.CONFINT(A47,$B$4:$B$39,$A$4:$A$39)
+cell	E47	=RAND.ETS(A47,$B$4:$B$39,$A$4:$A$39)
+cell	A48	45
+cell	C48	=FORECAST.ETS(A48,$B$4:$B$39,$A$4:$A$39)
+cell	D48	=FORECAST.ETS.CONFINT(A48,$B$4:$B$39,$A$4:$A$39)
+cell	E48	=RAND.ETS(A48,$B$4:$B$39,$A$4:$A$39)
+cell	A49	46
+cell	C49	=FORECAST.ETS(A49,$B$4:$B$39,$A$4:$A$39)
+cell	D49	=FORECAST.ETS.CONFINT(A49,$B$4:$B$39,$A$4:$A$39)
+cell	E49	=RAND.ETS(A49,$B$4:$B$39,$A$4:$A$39)
+cell	A50	47
+cell	C50	=FORECAST.ETS(A50,$B$4:$B$39,$A$4:$A$39)
+cell	D50	=FORECAST.ETS.CONFINT(A50,$B$4:$B$39,$A$4:$A$39)
+cell	E50	=RAND.ETS(A50,$B$4:$B$39,$A$4:$A$39)
+cell	A51	48
+cell	C51	=FORECAST.ETS(A51,$B$4:$B$39,$A$4:$A$39)
+cell	D51	=FORECAST.ETS.CONFINT(A51,$B$4:$B$39,$A$4:$A$39)
+cell	E51	=RAND.ETS(A51,$B$4:$B$39,$A$4:$A$39)

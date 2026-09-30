@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- A sheet of cells, and a fan of futures opening out of its last row. -->
+  <rect x="8" y="12" width="112" height="104" rx="10" fill="#ffffff" stroke="#3b5bdb" stroke-width="4"/>
+  <path d="M8 34h112M8 56h112M8 78h112M8 100h112M40 12v104M72 12v104" stroke="#dde2f0" stroke-width="2"/>
+  <path d="M40 78 L118 30 L118 110 Z" fill="#7d5ce6" fill-opacity="0.22"/>
+  <path d="M40 78 L118 50 L118 92 Z" fill="#7d5ce6" fill-opacity="0.38"/>
+  <path d="M12 96 L26 86 L40 78 L118 70" fill="none" stroke="#1f2937" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M40 78 L118 70" fill="none" stroke="#7d5ce6" stroke-width="4"/>
+  <circle cx="40" cy="78" r="5" fill="#3b5bdb"/>
+</svg>

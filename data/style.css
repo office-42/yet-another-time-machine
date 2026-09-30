@@ -1,0 +1,49 @@
+/* The window's few touches of its own; the rest is the GTK theme's. */
+
+.toolbar {
+  padding: 6px 8px;
+  border-bottom: 1px solid alpha(currentColor, 0.12);
+}
+
+.formula-bar {
+  padding: 4px 8px;
+  border-bottom: 1px solid alpha(currentColor, 0.12);
+}
+
+.formula-bar .fx {
+  font-style: italic;
+  font-weight: bold;
+  opacity: 0.6;
+  padding: 0 4px;
+}
+
+entry.formula {
+  font-family: monospace;
+}
+
+.statusbar {
+  padding: 3px 10px;
+  font-size: smaller;
+  border-top: 1px solid alpha(currentColor, 0.12);
+}
+
+.forecast-panel .panel-heading {
+  font-size: smaller;
+  font-weight: bold;
+  letter-spacing: 1px;
+  color: #6b4fe0;
+}
+
+.forecast-panel .panel-title {
+  font-size: larger;
+  font-weight: bold;
+}
+
+.forecast-panel .stat-value {
+  font-feature-settings: "tnum";
+}
+
+tmchart.chart-frame {
+  border: 1px solid alpha(currentColor, 0.15);
+  border-radius: 6px;
+}
