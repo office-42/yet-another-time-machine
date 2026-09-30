@@ -25,7 +25,7 @@
   - a row or column selected: a fan chart of the 90% and 50% bands and
     the median, a dozen single futures drawn faintly through them, and
     cells that are plain values (the history) drawn as a line leading
-    into it;
+    into it — or, if none is uncertain, just the line;
   - a cell whose futures are words (a state, a winner, a country): a bar
     for each, likeliest first;
   - two columns headed *lat* and *lon* (with a column of values and one
@@ -124,8 +124,10 @@ Operators, loosest first: comparison `= <> < > <= >=`, `&`, `+ -`,
 `A1:C9`. Errors are values: `#DIV/0!`, `#VALUE!`, `#REF!`, `#NAME?`,
 `#NUM!`, `#N/A`, and `#CIRC!` for a cell that depends on itself.
 
-**Help › Functions** (F1) lists every function with its syntax. The
-families are:
+**Help › Functions** (F1) lists every function with its syntax and a
+line of help; the search box at its top narrows the list to the
+functions whose name or description holds every word typed
+(`kriging`, `chance event`). The families are:
 
 - **Random** (`RAND.*`): distributions an uncertain cell draws from.
 - **Processes**: Markov chains (`RAND.MARKOV`, `MARKOV.PROB`,
@@ -180,8 +182,8 @@ families are:
 **Data › Import Picture…** loads a PNG, JPEG or any picture gdk-pixbuf
 reads; **Data › Import Map (GeoJSON)…** loads regions, lines and points.
 Each gets a name (the file's, until you change it), and **Data ›
-Pictures and Maps…** lists them, sets a picture's bounds — *west south
-east north*, in degrees — and removes them.
+Pictures and Maps…** lists them with a thumbnail, sets a picture's
+bounds — *west south east north*, in degrees — and removes them.
 
 Positions on a picture are fractions: *u* across from 0 at the left to 1
 at the right, *v* down from 0 at the top. A picture with bounds can also

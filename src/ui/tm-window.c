@@ -373,6 +373,10 @@ update_panel (TmWindow *self)
               t = isnan (values[i]) ? g_strdup ("—") : g_strdup_printf ("%.1f%%", 100 * values[i]);
             else if (i == STAT_VALID)
               t = g_strdup_printf ("%d / %d", s.valid, s.iterations);
+            else if (i == STAT_SE && tm_format_is_percent (format))
+              /* Small, so not through the cell's format, which might round
+               * it to nothing -- but a percentage beside percentages. */
+              t = g_strdup_printf ("%.2g%%", 100 * values[i]);
             else
               t = format_stat (values[i], i == STAT_SE ? NULL : format);
             gtk_label_set_text (GTK_LABEL (self->stat_values[i]), t);
@@ -1352,6 +1356,82 @@ on_bounds_activate (GtkEntry *entry, TmWindow *self)
   sheet_changed (self);
 }
 
+/* A map's outlines, small, for the list of sources. */
+static void
+draw_map_thumb (GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer data)
+{
+  TmMap *map = data;
+  double west = map->west, east = map->east, south = MAX (map->south, -60), north = MIN (map->north, 85);
+  double k = MIN (width / MAX (east - west, 1e-9), height / MAX (north - south, 1e-9));
+  double x0 = (width - (east - west) * k) / 2, y0 = (height - (north - south) * k) / 2;
+
+  cairo_set_source_rgb (cr, 0.905, 0.937, 0.973);
+  cairo_paint (cr);
+  cairo_set_source_rgb (cr, 0.55, 0.56, 0.52);
+  for (guint i = 0; i < map->features->len; i++)
+    {
+      TmFeature *f = g_ptr_array_index (map->features, i);
+
+      for (guint p = 0; p < f->polygons->len; p++)
+        {
+          GPtrArray *poly = g_ptr_array_index (f->polygons, p);
+          TmRing *ring = g_ptr_array_index (poly, 0);
+
+          for (int j = 0; j < ring->n; j++)
+            {
+              double x = x0 + (ring->xy[2 * j] - west) * k, y = y0 + (north - ring->xy[2 * j + 1]) * k;
+              if (j == 0)
+                cairo_move_to (cr, x, y);
+              else
+                cairo_line_to (cr, x, y);
+            }
+          cairo_close_path (cr);
+        }
+    }
+  cairo_fill (cr);
+}
+
+/* A picture, small, drawn from the pixels loaded rather than the file. */
+static void
+draw_image_thumb (GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer data)
+{
+  TmImage *im = data;
+  cairo_surface_t *surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, im->width, im->height);
+  unsigned char *pixels = cairo_image_surface_get_data (surface);
+  int stride = cairo_image_surface_get_stride (surface);
+  double k = MIN ((double) width / im->width, (double) height / im->height);
+
+  cairo_surface_flush (surface);
+  for (int y = 0; y < im->height; y++)
+    for (int x = 0; x < im->width; x++)
+      {
+        const float *q = im->rgba + ((gsize) y * im->width + x) * 4;
+        guint32 a = (guint32) (q[3] * 255 + 0.5);
+        guint32 r = (guint32) (q[0] * q[3] * 255 + 0.5), g = (guint32) (q[1] * q[3] * 255 + 0.5),
+                b = (guint32) (q[2] * q[3] * 255 + 0.5);
+
+        *(guint32 *) (pixels + y * stride + x * 4) = a << 24 | r << 16 | g << 8 | b;
+      }
+  cairo_surface_mark_dirty (surface);
+  cairo_translate (cr, (width - im->width * k) / 2, (height - im->height * k) / 2);
+  cairo_scale (cr, k, k);
+  cairo_rectangle (cr, 0, 0, im->width, im->height);
+  cairo_set_source_rgb (cr, 1, 1, 1);
+  cairo_fill (cr);
+  cairo_set_source_surface (cr, surface, 0, 0);
+  cairo_paint (cr);
+  cairo_surface_destroy (surface);
+}
+
+static GtkWidget *
+thumb_frame (GtkWidget *child)
+{
+  gtk_widget_set_size_request (child, 72, 54);
+  gtk_widget_set_halign (child, GTK_ALIGN_CENTER);
+  gtk_widget_set_valign (child, GTK_ALIGN_CENTER);
+  return child;
+}
+
 /* The dialog's list of what is loaded, built afresh each time. */
 static void
 show_sources (TmWindow *self, GtkWindow *dialog)
@@ -1360,6 +1440,7 @@ show_sources (TmWindow *self, GtkWindow *dialog)
   char **images = tm_sheet_image_names (self->sheet);
   char **maps = tm_sheet_map_names (self->sheet);
   GtkWidget *grid = gtk_grid_new ();
+  GtkWidget *intro;
   int row = 0;
 
   gtk_widget_set_margin_start (box, 16);
@@ -1372,15 +1453,38 @@ show_sources (TmWindow *self, GtkWindow *dialog)
   if (images[0] == NULL && maps[0] == NULL)
     gtk_box_append (GTK_BOX (box),
                     gtk_label_new ("No pictures or maps yet: use Data > Import Picture or Import Map."));
+  else
+    {
+      /* The example formulas name what is loaded. */
+      GString *text = g_string_new ("Formulas name them: ");
+
+      if (images[0] != NULL)
+        g_string_append_printf (text, "IMAGE.AT(\"%s\", u, v)%s", images[0], maps[0] != NULL ? ", " : "");
+      if (maps[0] != NULL)
+        g_string_append_printf (text, "MAP.REGION(\"%s\", lat, lon)", maps[0]);
+      g_string_append (text, ".");
+      if (images[0] != NULL)
+        g_string_append (text, " A picture's place on the Earth is its west, south, east and north "
+                               "edges, in degrees; press Enter to set it.");
+      intro = gtk_label_new (text->str);
+      g_string_free (text, TRUE);
+      gtk_label_set_wrap (GTK_LABEL (intro), TRUE);
+      gtk_label_set_xalign (GTK_LABEL (intro), 0);
+      gtk_widget_add_css_class (intro, "dim-label");
+      gtk_box_append (GTK_BOX (box), intro);
+    }
   for (int i = 0; images[i] != NULL; i++, row++)
     {
       TmImage *im = tm_sheet_get_image (self->sheet, images[i]);
       char *info = g_strdup_printf ("<b>%s</b>\npicture, %d × %d", images[i], im->width, im->height);
       GtkWidget *label = gtk_label_new (NULL), *entry = gtk_entry_new (), *remove;
+      GtkWidget *thumb = gtk_drawing_area_new ();
 
+      gtk_drawing_area_set_draw_func (GTK_DRAWING_AREA (thumb), draw_image_thumb, im, NULL);
+      gtk_grid_attach (GTK_GRID (grid), thumb_frame (thumb), 0, row, 1, 1);
       gtk_label_set_markup (GTK_LABEL (label), info);
       gtk_label_set_xalign (GTK_LABEL (label), 0);
-      gtk_grid_attach (GTK_GRID (grid), label, 0, row, 1, 1);
+      gtk_grid_attach (GTK_GRID (grid), label, 1, row, 1, 1);
       gtk_entry_set_placeholder_text (GTK_ENTRY (entry), "bounds: west south east north");
       gtk_widget_set_tooltip_text (entry, "Longitudes of the left and right edges, latitudes of the "
                                           "bottom and top; Enter to set");
@@ -1391,34 +1495,39 @@ show_sources (TmWindow *self, GtkWindow *dialog)
           g_free (b);
         }
       gtk_widget_set_hexpand (entry, TRUE);
+      gtk_widget_set_valign (entry, GTK_ALIGN_CENTER);
       g_object_set_data_full (G_OBJECT (entry), "source", g_strdup (images[i]), g_free);
       g_signal_connect (entry, "activate", G_CALLBACK (on_bounds_activate), self);
-      gtk_grid_attach (GTK_GRID (grid), entry, 1, row, 1, 1);
+      gtk_grid_attach (GTK_GRID (grid), entry, 2, row, 1, 1);
       remove = gtk_button_new_with_label ("Remove");
+      gtk_widget_set_valign (remove, GTK_ALIGN_CENTER);
       g_object_set_data_full (G_OBJECT (remove), "source", g_strdup (images[i]), g_free);
       g_signal_connect (remove, "clicked", G_CALLBACK (on_remove_source), self);
-      gtk_grid_attach (GTK_GRID (grid), remove, 2, row, 1, 1);
+      gtk_grid_attach (GTK_GRID (grid), remove, 3, row, 1, 1);
       g_free (info);
     }
   for (int i = 0; maps[i] != NULL; i++, row++)
     {
       TmMap *map = tm_sheet_get_map (self->sheet, maps[i]);
       char *info = g_strdup_printf ("<b>%s</b>\nmap, %u regions", maps[i], map->features->len);
-      GtkWidget *label = gtk_label_new (NULL), *path, *remove;
+      GtkWidget *label = gtk_label_new (NULL), *path, *remove, *thumb = gtk_drawing_area_new ();
 
+      gtk_drawing_area_set_draw_func (GTK_DRAWING_AREA (thumb), draw_map_thumb, map, NULL);
+      gtk_grid_attach (GTK_GRID (grid), thumb_frame (thumb), 0, row, 1, 1);
       gtk_label_set_markup (GTK_LABEL (label), info);
       gtk_label_set_xalign (GTK_LABEL (label), 0);
-      gtk_grid_attach (GTK_GRID (grid), label, 0, row, 1, 1);
+      gtk_grid_attach (GTK_GRID (grid), label, 1, row, 1, 1);
       path = gtk_label_new (tm_sheet_source_path (self->sheet, maps[i]));
       gtk_label_set_ellipsize (GTK_LABEL (path), PANGO_ELLIPSIZE_START);
       gtk_widget_add_css_class (path, "dim-label");
       gtk_widget_set_hexpand (path, TRUE);
       gtk_label_set_xalign (GTK_LABEL (path), 0);
-      gtk_grid_attach (GTK_GRID (grid), path, 1, row, 1, 1);
+      gtk_grid_attach (GTK_GRID (grid), path, 2, row, 1, 1);
       remove = gtk_button_new_with_label ("Remove");
+      gtk_widget_set_valign (remove, GTK_ALIGN_CENTER);
       g_object_set_data_full (G_OBJECT (remove), "source", g_strdup (maps[i]), g_free);
       g_signal_connect (remove, "clicked", G_CALLBACK (on_remove_source), self);
-      gtk_grid_attach (GTK_GRID (grid), remove, 2, row, 1, 1);
+      gtk_grid_attach (GTK_GRID (grid), remove, 3, row, 1, 1);
       g_free (info);
     }
   gtk_box_append (GTK_BOX (box), grid);
@@ -1435,7 +1544,7 @@ action_sources (GSimpleAction *a, GVariant *p, gpointer data)
 
   gtk_window_set_title (GTK_WINDOW (win), "Pictures and Maps");
   gtk_window_set_transient_for (GTK_WINDOW (win), GTK_WINDOW (self));
-  gtk_window_set_default_size (GTK_WINDOW (win), 620, 260);
+  gtk_window_set_default_size (GTK_WINDOW (win), 680, 300);
   show_sources (self, GTK_WINDOW (win));
   gtk_window_present (GTK_WINDOW (win));
 }
@@ -1450,14 +1559,80 @@ action_new (GSimpleAction *a, GVariant *p, gpointer data)
   gtk_window_present (GTK_WINDOW (win));
 }
 
-/* Help > Functions: every function the engine knows, by category. */
+/* Help > Functions: every function the engine knows, by category, with a
+ * search box that narrows them to those whose name or description holds
+ * every word typed. */
+typedef struct {
+  GtkWidget *head;          /* the category's heading */
+  GtkWidget *syntax, *help;
+  char      *text;          /* name, syntax and help, folded */
+} FnRow;
+
+typedef struct {
+  GArray    *rows;          /* of FnRow */
+  GtkWidget *count;
+} FnList;
+
+static void
+fn_list_free (gpointer p)
+{
+  FnList *l = p;
+
+  for (guint i = 0; i < l->rows->len; i++)
+    g_free (g_array_index (l->rows, FnRow, i).text);
+  g_array_free (l->rows, TRUE);
+  g_free (l);
+}
+
+static void
+on_functions_search (GtkSearchEntry *entry, FnList *l)
+{
+  char *query = g_utf8_casefold (gtk_editable_get_text (GTK_EDITABLE (entry)), -1);
+  char **words = g_strsplit_set (query, " \t", -1);
+  GHashTable *heads = g_hash_table_new (NULL, NULL);
+  int shown = 0;
+  char *count;
+
+  for (guint i = 0; i < l->rows->len; i++)
+    {
+      FnRow *r = &g_array_index (l->rows, FnRow, i);
+      gboolean match = TRUE;
+
+      for (int w = 0; words[w] != NULL && match; w++)
+        match = words[w][0] == '\0' || strstr (r->text, words[w]) != NULL;
+      gtk_widget_set_visible (r->syntax, match);
+      gtk_widget_set_visible (r->help, match);
+      if (match)
+        {
+          g_hash_table_add (heads, r->head);
+          shown++;
+        }
+    }
+  for (guint i = 0; i < l->rows->len; i++)
+    {
+      GtkWidget *head = g_array_index (l->rows, FnRow, i).head;
+      gtk_widget_set_visible (head, g_hash_table_contains (heads, head));
+    }
+  count = g_strdup_printf (shown == (int) l->rows->len ? "%d functions" : "%d of %d",
+                           shown, l->rows->len);
+  gtk_label_set_text (GTK_LABEL (l->count), count);
+  g_free (count);
+  g_hash_table_destroy (heads);
+  g_strfreev (words);
+  g_free (query);
+}
+
 static void
 action_functions (GSimpleAction *a, GVariant *p, gpointer data)
 {
   TmWindow *self = data;
   GtkWidget *win = gtk_window_new ();
+  GtkWidget *outer = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+  GtkWidget *bar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+  GtkWidget *search = gtk_search_entry_new ();
   GtkWidget *scroll = gtk_scrolled_window_new ();
   GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 2);
+  FnList *l = g_new0 (FnList, 1);
   int n;
   const TmFunction *const *list = tm_function_list (&n);
   static const char *const order[] = {
@@ -1468,10 +1643,21 @@ action_functions (GSimpleAction *a, GVariant *p, gpointer data)
 
   gtk_window_set_title (GTK_WINDOW (win), "Functions");
   gtk_window_set_transient_for (GTK_WINDOW (win), GTK_WINDOW (self));
-  gtk_window_set_default_size (GTK_WINDOW (win), 560, 640);
+  gtk_window_set_default_size (GTK_WINDOW (win), 600, 700);
+  l->rows = g_array_new (FALSE, FALSE, sizeof (FnRow));
+  l->count = gtk_label_new (NULL);
+  gtk_widget_add_css_class (l->count, "dim-label");
+  gtk_search_entry_set_placeholder_text (GTK_SEARCH_ENTRY (search), "Search: kriging, regression, chance…");
+  gtk_widget_set_hexpand (search, TRUE);
+  gtk_box_append (GTK_BOX (bar), search);
+  gtk_box_append (GTK_BOX (bar), l->count);
+  gtk_widget_set_margin_start (bar, 12);
+  gtk_widget_set_margin_end (bar, 12);
+  gtk_widget_set_margin_top (bar, 10);
+  gtk_widget_set_margin_bottom (bar, 6);
   gtk_widget_set_margin_start (box, 16);
   gtk_widget_set_margin_end (box, 16);
-  gtk_widget_set_margin_top (box, 12);
+  gtk_widget_set_margin_top (box, 6);
   gtk_widget_set_margin_bottom (box, 16);
 
   for (guint k = 0; k < G_N_ELEMENTS (order); k++)
@@ -1484,30 +1670,42 @@ action_functions (GSimpleAction *a, GVariant *p, gpointer data)
       gtk_box_append (GTK_BOX (box), head);
       for (int i = 0; i < n; i++)
         {
-          GtkWidget *syntax, *help;
-          char *markup;
+          FnRow row;
+          char *markup, *text;
 
           if (strcmp (list[i]->category, order[k]) != 0)
             continue;
           markup = g_markup_printf_escaped ("<tt>%s</tt>", list[i]->syntax);
-          syntax = gtk_label_new (NULL);
-          gtk_label_set_markup (GTK_LABEL (syntax), markup);
-          gtk_label_set_selectable (GTK_LABEL (syntax), TRUE);
-          gtk_widget_set_halign (syntax, GTK_ALIGN_START);
-          gtk_widget_set_margin_top (syntax, 4);
-          help = gtk_label_new (list[i]->help);
-          gtk_label_set_wrap (GTK_LABEL (help), TRUE);
-          gtk_label_set_xalign (GTK_LABEL (help), 0);
-          gtk_widget_set_margin_start (help, 16);
-          gtk_widget_add_css_class (help, "dim-label");
-          gtk_box_append (GTK_BOX (box), syntax);
-          gtk_box_append (GTK_BOX (box), help);
+          row.head = head;
+          row.syntax = gtk_label_new (NULL);
+          gtk_label_set_markup (GTK_LABEL (row.syntax), markup);
+          gtk_label_set_selectable (GTK_LABEL (row.syntax), TRUE);
+          gtk_widget_set_halign (row.syntax, GTK_ALIGN_START);
+          gtk_widget_set_margin_top (row.syntax, 4);
+          row.help = gtk_label_new (list[i]->help);
+          gtk_label_set_wrap (GTK_LABEL (row.help), TRUE);
+          gtk_label_set_xalign (GTK_LABEL (row.help), 0);
+          gtk_widget_set_margin_start (row.help, 16);
+          gtk_widget_add_css_class (row.help, "dim-label");
+          gtk_box_append (GTK_BOX (box), row.syntax);
+          gtk_box_append (GTK_BOX (box), row.help);
+          text = g_strconcat (list[i]->syntax, " ", list[i]->help, " ", order[k], NULL);
+          row.text = g_utf8_casefold (text, -1);
+          g_free (text);
+          g_array_append_val (l->rows, row);
           g_free (markup);
         }
     }
+  g_object_set_data_full (G_OBJECT (win), "functions", l, fn_list_free);
+  g_signal_connect (search, "search-changed", G_CALLBACK (on_functions_search), l);
+  on_functions_search (GTK_SEARCH_ENTRY (search), l);
   gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scroll), box);
-  gtk_window_set_child (GTK_WINDOW (win), scroll);
+  gtk_widget_set_vexpand (scroll, TRUE);
+  gtk_box_append (GTK_BOX (outer), bar);
+  gtk_box_append (GTK_BOX (outer), scroll);
+  gtk_window_set_child (GTK_WINDOW (win), outer);
   gtk_window_present (GTK_WINDOW (win));
+  gtk_widget_grab_focus (search);
 }
 
 static void

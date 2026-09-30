@@ -172,9 +172,14 @@ tm_draw_heatmap (cairo_t *cr, PangoLayout *layout, int width, int height,
       {
         double rgb[3], x = v[i * nc + j];
 
+        /* Edges on whole pixels, shared with the neighbours: blended
+         * fractional edges would show as faint seams between cells. */
+        double xa = round (x0 + j * cell), xb = round (x0 + (j + 1) * cell);
+        double ya = round (y0 + i * cell), yb = round (y0 + (i + 1) * cell);
+
         scale_colour (isnan (x) ? NAN : (x - lo) / (hi - lo), rgb);
         cairo_set_source_rgb (cr, rgb[0], rgb[1], rgb[2]);
-        cairo_rectangle (cr, x0 + j * cell, y0 + i * cell, cell + 0.5, cell + 0.5);
+        cairo_rectangle (cr, xa, ya, xb - xa, yb - ya);
         cairo_fill (cr);
       }
   cairo_set_source_rgb (cr, 0.35, 0.36, 0.40);

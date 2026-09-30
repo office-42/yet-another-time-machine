@@ -261,7 +261,7 @@ cell	D18	4
 cell	E18	10
 cell	F18	1.762
 cell	G18	=F18>1.5
-cell	H18	The bid: fixed price, or cost plus 12%?
+cell	H18	The bid, on the regression's overruns: fixed price, or cost plus 12%?
 cell	A19	P16
 cell	B19	12
 cell	C19	18
@@ -288,7 +288,7 @@ cell	E21	9
 cell	F21	1.357
 cell	G21	=F21>1.5
 cell	H21	Profit at a fixed price, this future
-cell	K21	=K20-K19*K15
+cell	K21	=K20-K19*K16
 cell	A22	P19
 cell	B22	7
 cell	C22	18
@@ -297,7 +297,7 @@ cell	E22	9
 cell	F22	1.111
 cell	G22	=F22>1.5
 cell	H22	Profit at cost plus 12%, this future
-cell	K22	=K19*K15*0.12
+cell	K22	=K19*K16*0.12
 cell	A23	P20
 cell	B23	15
 cell	C23	16

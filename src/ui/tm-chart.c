@@ -622,7 +622,12 @@ draw (TmChart *self, cairo_t *cr, int width, int height)
                 }
             }
         }
-      if (simulated > 0)
+      int valid = 0;
+
+      for (int i = 0; i < n; i++)
+        valid += pts[i].valid;
+      /* Plain numbers, a history with no future yet, are a line. */
+      if (simulated > 0 || valid >= 2)
         draw_fan (self, cr, layout, width, height, pts, n,
                   tm_format_is_percent (tm_sheet_get_format (self->sheet, r->row1, r->col1)),
                   names);

@@ -809,11 +809,14 @@ Z1
 ' "$samples/wildfire.tm"
 near Z1 0.27 0.07
 
-run 'examples, crops and gauges' 'Z1 = =B13
+run 'examples, crops' 'Z1 = =G4
+Z2 = =G5
 simulate
 Z1
+Z2
 ' "$samples/crops.tm"
 near Z1 0.51 0.05
+near Z2 0.99 0.02
 
 run 'examples, storm' 'Z1 = =B24
 simulate
@@ -829,7 +832,7 @@ simulate
 Z1
 Z2
 ' "$samples/analogues.tm"
-near Z1 0.29 0.05
+near Z1 0.37 0.05
 near Z2 1.25 0.02
 
 run 'examples, updating' 'Z1 = =B8

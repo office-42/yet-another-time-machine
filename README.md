@@ -149,6 +149,8 @@ landing pages; the lifetimes example fits a Weibull to pumps some of which
 are still running, and falls back on Gott's rule when there is nothing to
 go on.
 
+![The project-overrun example: sixty past projects as a table; forecasts for a new one by analogues, multiple, quantile and logistic regression and a conformal interval; and the fixed-price bid's profit as a histogram, a loss in almost a third of futures](docs/images/analogues.png)
+
 ## Pictures and maps
 
 **Data › Import Picture** and **Data › Import Map** load a PNG or JPEG, or
@@ -293,7 +295,8 @@ a formula bar, fill, copy, cut and paste, undo, number formats, the
 forecast panel with histograms, fans, maps and heat maps, in-cell editing
 and point mode.
 [docs/ROADMAP.md](docs/ROADMAP.md) lists what comes next. There are 249
-functions; **Help › Functions** (F1) lists them all.
+functions; **Help › Functions** (F1) lists and searches them all.
+[docs/GALLERY.md](docs/GALLERY.md) shows every feature in a screenshot.
 
 ## License
 

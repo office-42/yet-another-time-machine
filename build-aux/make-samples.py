@@ -554,18 +554,18 @@ s.set("A24", "Radar legend")
 s.set("A25", "dBZ"); s.set("B25", "Colour")
 for i, (level, colour) in enumerate(RADAR):
     s.set(f"A{26 + i}", level); s.set(f"B{26 + i}", colour)
-s.set("A34", "The extrapolation an hour ahead (rain rate, mm/h), over the whole frame:")
+s.set("A34", "The radar an hour ahead (dBZ), extrapolated over the whole frame; select B35:AG58:")
 g0r, g0c = 35, 1
 for i in range(24):
     for j in range(32):
         c = col(g0c + j)
-        s.set(f"{c}{g0r + i}", f'=IFERROR((10^(IMAGE.LEGEND("radar_1",(COLUMN()-{g0c + 1}+0.5)/32-6*$B$5,(ROW()-{g0r}+0.5)/24-6*$B$6,$B$26:$B$32,$A$26:$A$32,0.12)/10)/200)^(1/1.6),0)')
+        s.set(f"{c}{g0r + i}", f'=IFERROR(IMAGE.LEGEND("radar_1",(COLUMN()-{g0c + 1}+0.5)/32-6*$B$5,(ROW()-{g0r}+0.5)/24-6*$B$6,$B$26:$B$32,$A$26:$A$32,0.12),0)')
 s.fmt("B5 B6 B8 B9 B10 B11", "0.0000")
 s.fmt("B7", "0")
 s.fmt(" ".join(f"{col(1 + k)}{r}" for k in range(13) for r in (14, 15)), "0.000")
 s.fmt(" ".join(f"{col(1 + k)}{r}" for k in range(13) for r in (16, 17, 18, 22)), "0.0")
 s.fmt(" ".join(f"{col(1 + k)}21" for k in range(13)) + " H3 H5", "0%")
-s.fmt(" ".join(f"{col(g0c + j)}{g0r + i}" for i in range(24) for j in range(32)), "0.0")
+s.fmt(" ".join(f"{col(g0c + j)}{g0r + i}" for i in range(24) for j in range(32)), "0")
 s.save("nowcast.tm")
 
 # ---- 10. Wildfire --------------------------------------------------------
@@ -595,7 +595,8 @@ write_png("landcover.png", LW, LH, land)
 s = Sheet(iterations=2000)
 s.width("A", 60)
 for c in range(1, 41):
-    s.width(col(c), 20)
+    s.width(col(c), 36)
+s.width("M", 44)   # room for the town's chance, "27%"
 s.source("image", "land", "pictures/landcover.png", None)
 s.set("A1", "Where will the fire go? A spread model over a land-cover picture")
 s.set("A2", "Start row"); s.set("D2", 22)
@@ -625,6 +626,7 @@ for i in range(30):
     for j in range(40):
         c = col(1 + j)
         s.set(f"{c}{b0 + i}", f"=RAND.SPREAD($B${f0}:$AO${f0 + 29},$D$2,$I$2,$M$2,$R$2,{i + 1},{j + 1},$W$2,$AB$2)")
+s.fmt(" ".join(f"{col(1 + j)}{f0 + i}" for i in range(30) for j in range(40)), "0.0")
 s.fmt("M5", "0%")
 s.fmt("Z5", "0")
 s.save("wildfire.tm")
@@ -737,26 +739,34 @@ for week in range(1, 7):
     write_png(f"field-week{week}.png", FW, FH, field)
 
 s = Sheet()
-s.width("A", 240); s.width("B", 80); s.width("C", 80); s.width("D", 90)
+s.width("A", 60); s.width("B", 100); s.width("C", 80); s.width("D", 130); s.width("E", 24)
+s.width("F", 330); s.width("G", 70)
 for week in range(1, 7):
     s.source("image", f"week{week}", f"pictures/field-week{week}.png", None)
 s.set("A1", "When will the canopy close? Green cover measured from weekly photographs")
-s.set("A3", "Week"); s.set("B3", "Green cover"); s.set("C3", "Log-odds")
-for week in range(1, 7):
+s.set("A3", "Week"); s.set("B3", "Green cover"); s.set("C3", "Log-odds"); s.set("D3", "Cover, one future")
+for week in range(1, 11):
     r = 3 + week
     s.set(f"A{r}", week)
-    # Excess green, 2g - r - b of the chromatic coordinates, above 0.1: plant.
-    s.set(f"B{r}", f'=IMAGE.FRACTION("week{week}","exg",">0.1")')
-    s.set(f"C{r}", f"=LN(B{r}/(1-B{r}))")
-s.set("A11", "Cover in week 8, straight-line log-odds"); s.set("B11", "=1/(1+EXP(-FORECAST.LINEAR(8,C4:C9,A4:A9)))")
-s.set("A12", "Cover in week 8, one future"); s.set("B12", "=1/(1+EXP(-RAND.LINEAR(8,C4:C9,A4:A9)))")
-s.set("A13", "Chance the canopy has closed (80%) by week 8"); s.set("B13", '=SIM.PROB(B12,">=0.8")')
-s.set("A14", "Week the log-odds reach 80%"); s.set("B14", "=(LN(0.8/0.2)-INTERCEPT(C4:C9,A4:A9))/SLOPE(C4:C9,A4:A9)")
-s.set("A16", "Each week's cover is read straight off its photograph; the pictures are in")
-s.set("A17", "samples/pictures, and Data > Pictures and Maps lists them.")
-s.fmt(" ".join(f"B{r}" for r in range(4, 10)) + " B11 B12 B13", "0%")
+    if week <= 6:
+        # Excess green, 2g - r - b of the chromatic coordinates, above 0.1: plant.
+        s.set(f"B{r}", f'=IMAGE.FRACTION("week{week}","exg",">0.1")')
+        s.set(f"C{r}", f"=LN(B{r}/(1-B{r}))")
+        s.set(f"D{r}", f"=B{r}")
+    else:
+        # A straight line in the log-odds is a logistic curve in the cover;
+        # the line's own uncertainty is shared by the weeks of one future.
+        s.set(f"D{r}", f"=1/(1+EXP(-RAND.LINEAR(A{r},$C$4:$C$9,$A$4:$A$9)))")
+s.set("F3", "Cover in week 8, straight-line log-odds"); s.set("G3", "=1/(1+EXP(-FORECAST.LINEAR(8,C4:C9,A4:A9)))")
+s.set("F4", "Chance the canopy has closed (80%) by week 8"); s.set("G4", '=SIM.PROB(D11,">=0.8")')
+s.set("F5", "... by week 10"); s.set("G5", '=SIM.PROB(D13,">=0.8")')
+s.set("F6", "Week the log-odds reach 80%"); s.set("G6", "=(LN(0.8/0.2)-INTERCEPT(C4:C9,A4:A9))/SLOPE(C4:C9,A4:A9)")
+s.set("F8", "Select D4:D13 for the cover measured, then forecast, as a fan.")
+s.set("F9", "Each week's cover is read straight off its photograph;")
+s.set("F10", "Data > Pictures and Maps lists the six of them.")
+s.fmt(" ".join(f"B{r}" for r in range(4, 10)) + " " + " ".join(f"D{r}" for r in range(4, 14)) + " G3 G4 G5", "0%")
 s.fmt(" ".join(f"C{r}" for r in range(4, 10)), "0.00")
-s.fmt("B14", "0.0")
+s.fmt("G6", "0.0")
 s.save("crops.tm")
 print("ok, pictures and maps")
 
@@ -810,11 +820,11 @@ for i, row in enumerate(rows):
         s.set(f"L{r}", row[2])
 s.set("H15", "Overrun, one future: an analogue's (F5 simulates)"); s.set("K15", f"=RAND.KNN({x0},{Y},{X},8,1)")
 s.set("H16", "Overrun, one future: the regression's"); s.set("K16", f"=RAND.MLR({x0},{Y},{X})")
-s.set("H18", "The bid: fixed price, or cost plus 12%?")
+s.set("H18", "The bid, on the regression's overruns: fixed price, or cost plus 12%?")
 s.set("H19", "Cost if it runs to plan"); s.set("K19", 1200000)
 s.set("H20", "Fixed price asked"); s.set("K20", 1650000)
-s.set("H21", "Profit at a fixed price, this future"); s.set("K21", "=K20-K19*K15")
-s.set("H22", "Profit at cost plus 12%, this future"); s.set("K22", "=K19*K15*0.12")
+s.set("H21", "Profit at a fixed price, this future"); s.set("K21", "=K20-K19*K16")
+s.set("H22", "Profit at cost plus 12%, this future"); s.set("K22", "=K19*K16*0.12")
 s.set("H23", "Expected profit: fixed, cost plus"); s.set("K23", "=SIM.MEAN(K21)"); s.set("L23", "=SIM.MEAN(K22)")
 s.set("H24", "Chance the fixed price turns out the better deal"); s.set("K24", "=SIM.PBEST(1,K21,K22)")
 s.set("H25", "Worth, for sure, to a firm with 400k of risk tolerance"); s.set("K25", "=SIM.CE(K21,400000)"); s.set("L25", "=SIM.CE(K22,400000)")
