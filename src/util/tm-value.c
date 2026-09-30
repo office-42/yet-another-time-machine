@@ -121,16 +121,78 @@ tm_error_code_parse (const char *text, TmErrorCode *out)
 }
 
 /* The whole of text, give or take spaces, as a number; "45%" is 0.45. */
+static const char *const CURRENCIES[] = { "$", "\u20ac", "\u00a3", "\u00a5", NULL };
+
+char *
+tm_number_plain (const char *text)
+{
+  GString *out = g_string_new (NULL);
+  const char *p = text;
+  int digits = 0, groups = 0;
+  gboolean currency = FALSE;
+
+  while (g_ascii_isspace (*p))
+    p++;
+  if (*p == '-' || *p == '+')
+    g_string_append_c (out, *p++);
+  for (int i = 0; CURRENCIES[i] != NULL; i++)
+    if (g_str_has_prefix (p, CURRENCIES[i]))
+      {
+        p += strlen (CURRENCIES[i]);
+        currency = TRUE;
+        break;
+      }
+  if (currency && out->len == 0 && (*p == '-' || *p == '+'))
+    g_string_append_c (out, *p++);
+  /* The whole part: digits, and commas between groups of three. */
+  while (g_ascii_isdigit (*p) || *p == ',')
+    {
+      if (*p == ',')
+        {
+          if (digits == 0 || (groups == 0 ? digits > 3 : digits != 3)
+              || !g_ascii_isdigit (p[1]) || !g_ascii_isdigit (p[2]) || !g_ascii_isdigit (p[3]))
+            {
+              g_string_free (out, TRUE);
+              return NULL;
+            }
+          groups++;
+          digits = 0;
+        }
+      else
+        {
+          g_string_append_c (out, *p);
+          digits++;
+        }
+      p++;
+    }
+  if ((groups > 0 && digits != 3) || (!currency && groups == 0))
+    {
+      g_string_free (out, TRUE);
+      return NULL;
+    }
+  g_string_append (out, p);
+  return g_string_free (out, FALSE);
+}
+
 static gboolean
 parse_number (const char *text, double *out)
 {
-  char *end;
+  char *end, *plain;
   double d;
+  gboolean ok;
 
   while (g_ascii_isspace (*text))
     text++;
   if (*text == '\0')
     return FALSE;
+  /* "1,234.5" and "$99" as they are typed: a currency sign up front and
+   * thousands separators, in threes, taken out. */
+  if ((plain = tm_number_plain (text)) != NULL)
+    {
+      ok = parse_number (plain, out);
+      g_free (plain);
+      return ok;
+    }
   /* strtod reads "inf", "nan" and hex, none of which a user means. */
   for (const char *p = text; *p != '\0'; p++)
     if (!(g_ascii_isdigit (*p) || strchr ("+-.eE% ", *p) != NULL))

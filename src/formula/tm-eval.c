@@ -61,6 +61,9 @@ ensure_functions (void)
       add_table (all, tm_fn_forecast, tm_fn_forecast_count);
       add_table (all, tm_fn_sim, tm_fn_sim_count);
       add_table (all, tm_fn_domains, tm_fn_domains_count);
+      add_table (all, tm_fn_spatial, tm_fn_spatial_count);
+      add_table (all, tm_fn_learn, tm_fn_learn_count);
+      add_table (all, tm_fn_score, tm_fn_score_count);
       n_sorted = (int) all->len;
       sorted = (const TmFunction **) g_ptr_array_free (all, FALSE);
       qsort (sorted, (size_t) n_sorted, sizeof *sorted, compare_functions);
@@ -241,6 +244,62 @@ tm_arg_pairs (TmEvalContext *ctx, const TmArg *ys, const TmArg *xs,
   return TRUE;
 }
 
+gboolean
+tm_arg_columns (TmEvalContext *ctx, const TmArg *const *args, int k,
+                double **cols, int *n, TmValue *err)
+{
+  const TmValue ***cells = g_new0 (const TmValue **, k);
+  int size = -1, j;
+  gboolean ok = TRUE;
+
+  *n = 0;
+  for (j = 0; j < k && ok; j++)
+    {
+      int m;
+
+      cells[j] = tm_arg_cells (ctx, args[j], &m);
+      for (int i = 0; ok && i < m; i++)
+        if (cells[j][i]->type == TM_VALUE_ERROR)
+          {
+            *err = tm_value_copy (cells[j][i]);
+            ok = FALSE;
+          }
+      if (ok && size >= 0 && m != size)
+        {
+          *err = tm_value_error (TM_ERR_NA);
+          ok = FALSE;
+        }
+      size = m;
+    }
+  if (ok)
+    {
+      for (j = 0; j < k; j++)
+        cols[j] = g_new (double, MAX (size, 1));
+      for (int i = 0; i < size; i++)
+        {
+          gboolean keep = TRUE;
+
+          for (j = 0; j < k && keep; j++)
+            {
+              const TmValue *v = cells[j][i];
+
+              if (v->type == TM_VALUE_NUMBER)
+                cols[j][*n] = v->as.number;
+              else if (v->type == TM_VALUE_BOOL)
+                cols[j][*n] = v->as.boolean ? 1 : 0;
+              else
+                keep = FALSE;
+            }
+          if (keep)
+            (*n)++;
+        }
+    }
+  for (j = 0; j < k; j++)
+    g_free (cells[j]);
+  g_free (cells);
+  return ok;
+}
+
 /* ---- Criteria --------------------------------------------------------- */
 
 void
@@ -274,9 +333,17 @@ tm_criteria_match (const TmCriteria *criteria, const TmValue *value)
 
   if (value->type == TM_VALUE_ERROR)
     return FALSE;
-  /* ">5" asks a question of numbers; text is never greater than five. */
+  /* "=" alone and "<>" alone ask whether a cell is empty. */
+  if (criteria->value.type == TM_VALUE_EMPTY
+      && (criteria->op == TM_OP_EQ || criteria->op == TM_OP_NE))
+    return (value->type == TM_VALUE_EMPTY) == (criteria->op == TM_OP_EQ);
+  /* ">5" asks a question of numbers, "<m" of text: text is never greater
+   * than five, nor a number before "m". */
   if (criteria->value.type == TM_VALUE_NUMBER && value->type != TM_VALUE_NUMBER)
     return criteria->op == TM_OP_NE;
+  if (criteria->value.type == TM_VALUE_TEXT && value->type != TM_VALUE_TEXT
+      && criteria->op != TM_OP_EQ && criteria->op != TM_OP_NE)
+    return FALSE;
   c = tm_value_compare (value, &criteria->value);
   switch (criteria->op)
     {

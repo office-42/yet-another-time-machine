@@ -36,8 +36,12 @@
  *     format B1:B9 0.0%        a number format; no code for General
  *     undo                     redo
  *     filldown A1:A9           fillright A1:F1
- *     copy A1:B2 D1            clear A1:B2
+ *     copy A1:B2 D1            move A1:B2 D1 (cut and paste)
+ *     clear A1:B2
  *     load FILE                save FILE          export FILE
+ *     image FILE [NAME [W S E N]]   a picture as data, with its bounds
+ *     map FILE [NAME]          a GeoJSON map as data
+ *     sources                  the pictures and maps loaded
  *     functions                every function, with its syntax
  *
  * It exists so the engine can be exercised with no window, and so that
@@ -46,6 +50,7 @@
 
 #include "tm-sheet.h"
 #include "tm-file.h"
+#include "tm-sources.h"
 #include "tm-eval.h"
 
 #include <math.h>
@@ -130,6 +135,19 @@ stats (TmSheet *sheet, const char *arg)
 
   if (!parse_ref (arg, &ref))
     return;
+  if (sim != NULL)
+    {
+      const char **labels;
+      int *counts, k = tm_sim_categories (sim, ref.row, ref.col, &labels, &counts);
+
+      /* Futures that came out as text: how often each. */
+      for (int i = 0; i < k && i < 20; i++)
+        printf ("%s\t%s\t%.4g%%\n", arg, labels[i], 100.0 * counts[i] / tm_sim_iterations (sim));
+      g_free (labels);
+      g_free (counts);
+      if (k > 0)
+        return;
+    }
   if (sim == NULL || !tm_sim_stats (sim, ref.row, ref.col, &s))
     {
       printf ("%s\tno samples: not uncertain, or not simulated yet\n", arg);
@@ -213,6 +231,9 @@ progress (int done, int total, gpointer data)
   return TRUE;
 }
 
+/* Cells set since the sheet was last worked out. */
+static gboolean dirty;
+
 /* Returns FALSE on a line it could not make sense of. */
 static gboolean
 run_line (TmSheet *sheet, char *line)
@@ -241,11 +262,18 @@ run_line (TmSheet *sheet, char *line)
           while (*input == ' ')
             input++;
           tm_sheet_set_input (sheet, ref.row, ref.col, input);
-          tm_sheet_recalc (sheet);
+          /* Worked out when next asked for, so that a script of ten
+           * thousand cells is not ten thousand recalculations. */
+          dirty = TRUE;
           g_free (name);
           return TRUE;
         }
       g_free (name);
+    }
+  if (dirty)
+    {
+      tm_sheet_recalc (sheet);
+      dirty = FALSE;
     }
 
   if (tm_ref_parse (line, &ref))
@@ -276,6 +304,21 @@ run_line (TmSheet *sheet, char *line)
     }
   else if (strcmp (line, "functions") == 0)
     functions ();
+  else if (strcmp (line, "sources") == 0)
+    {
+      char **images = tm_sheet_image_names (sheet), **maps = tm_sheet_map_names (sheet);
+
+      for (int i = 0; images[i] != NULL; i++)
+        {
+          TmImage *im = tm_sheet_get_image (sheet, images[i]);
+          printf ("image\t%s\t%dx%d%s\n", images[i], im->width, im->height,
+                  im->has_bounds ? "\twith bounds" : "");
+        }
+      for (int i = 0; maps[i] != NULL; i++)
+        printf ("map\t%s\t%u features\n", maps[i], tm_sheet_get_map (sheet, maps[i])->features->len);
+      g_strfreev (images);
+      g_strfreev (maps);
+    }
   else if (strcmp (line, "simulate") == 0)
     {
       TmSim *sim;
@@ -284,8 +327,9 @@ run_line (TmSheet *sheet, char *line)
         tm_sheet_set_iterations (sheet, atoi (arg));
       tm_sheet_simulate (sheet, progress, NULL);
       sim = tm_sheet_get_sim (sheet);
-      printf ("simulated %d iterations, seed %" G_GUINT64_FORMAT ", %d cells kept%s\n",
+      printf ("simulated %d iterations, seed %" G_GUINT64_FORMAT ", %d cells kept%s%s\n",
               tm_sim_iterations (sim), tm_sim_seed (sim), tm_sim_n_tracked (sim),
+              tm_sheet_kept_all (sheet) ? "" : " (too many to keep all: the outputs)",
               tm_sim_latin (sim) ? ", Latin hypercube" : "");
       fprintf (stderr, "(%.3f s)\n", tm_sim_seconds (sim));
     }
@@ -340,19 +384,54 @@ run_line (TmSheet *sheet, char *line)
         tm_sheet_fill_right (sheet, &range);
       tm_sheet_recalc (sheet);
     }
-  else if (strcmp (line, "copy") == 0)
+  else if (strcmp (line, "copy") == 0 || strcmp (line, "move") == 0)
     {
-      char *dest = strchr (arg, ' ');
+      char *dest = arg != NULL ? strchr (arg, ' ') : NULL;
 
       if (dest == NULL)
         {
-          fprintf (stderr, "copy RANGE CELL\n");
+          fprintf (stderr, "%s RANGE CELL\n", line);
           return FALSE;
         }
       *dest++ = '\0';
       if (!parse_range (arg, &range) || !parse_ref (g_strstrip (dest), &ref))
         return FALSE;
-      tm_sheet_copy_range (sheet, &range, ref.row, ref.col);
+      if (line[0] == 'c')
+        tm_sheet_copy_range (sheet, &range, ref.row, ref.col);
+      else
+        tm_sheet_move_range (sheet, &range, ref.row, ref.col);
+      tm_sheet_recalc (sheet);
+    }
+  else if (strcmp (line, "image") == 0 || strcmp (line, "map") == 0)
+    {
+      /* image FILE [NAME [west south east north]], map FILE [NAME] */
+      char **w = g_strsplit_set (arg, " \t", -1);
+      GPtrArray *words = g_ptr_array_new ();
+      char *used;
+
+      for (int i = 0; w[i] != NULL; i++)
+        if (*w[i] != '\0')
+          g_ptr_array_add (words, w[i]);
+      used = tm_sheet_load_source (sheet, g_ptr_array_index (words, 0),
+                                   words->len > 1 ? g_ptr_array_index (words, 1) : NULL, &error);
+      if (used != NULL && words->len >= 6)
+        {
+          TmImage *image = tm_sheet_get_image (sheet, used);
+          if (image != NULL)
+            {
+              image->has_bounds = TRUE;
+              image->west = g_ascii_strtod (g_ptr_array_index (words, 2), NULL);
+              image->south = g_ascii_strtod (g_ptr_array_index (words, 3), NULL);
+              image->east = g_ascii_strtod (g_ptr_array_index (words, 4), NULL);
+              image->north = g_ascii_strtod (g_ptr_array_index (words, 5), NULL);
+            }
+        }
+      g_ptr_array_free (words, TRUE);
+      g_strfreev (w);
+      if (used == NULL)
+        goto file_error;
+      printf ("loaded %s\n", used);
+      g_free (used);
       tm_sheet_recalc (sheet);
     }
   else if (strcmp (line, "load") == 0)

@@ -47,13 +47,14 @@ cairo_dep      = dependency('cairo',       version: '>= 1.16')
 pango_dep      = dependency('pango',       version: '>= 1.50')
 pangocairo_dep = dependency('pangocairo',  version: '>= 1.50')
 gtk_dep        = dependency('gtk4',        version: '>= 4.10')
+pixbuf_dep     = dependency('gdk-pixbuf-2.0', version: '>= 2.42')
 m_dep          = cc.find_library('m', required: false)
 
 # The engine -- values, formulas, the sheet and the simulator -- needs
-# GLib and the maths library and nothing else.  It does not need GTK, and
-# must not: the terminal front-end and the smoke test run it with no
-# display at all.
-core_deps = [glib_dep, gobject_dep, gio_dep, m_dep]
+# GLib, gdk-pixbuf to read pictures, and the maths library.  It does not
+# need GTK, and must not: the terminal front-end and the smoke test run it
+# with no display at all.
+core_deps = [glib_dep, gobject_dep, gio_dep, pixbuf_dep, m_dep]
 app_deps  = core_deps + [cairo_dep, pango_dep, pangocairo_dep, gtk_dep]
 
 subdir('data')

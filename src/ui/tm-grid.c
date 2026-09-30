@@ -814,26 +814,31 @@ on_pressed (GtkGestureClick *gesture, int n_press, double x, double y, TmGrid *s
       g_signal_emit (self, signals[SIGNAL_POINT], 0, &r);
       return;
     }
+  if ((y < HEADER_HEIGHT && x >= HEADER_WIDTH) || (x < HEADER_WIDTH && y >= HEADER_HEIGHT))
+    {
+      /* A header selects the used part of its column or row -- or, while
+       * a formula is being pointed into, names it there. */
+      gboolean column = y < HEADER_HEIGHT;
+      TmRange r = column ? (TmRange) { 0, col, 0, col } : (TmRange) { row, 0, row, 0 };
+      TmRange used;
+
+      if (tm_sheet_used_range (self->sheet, &used))
+        {
+          if (column)
+            r.row1 = MAX (used.row1, 0);
+          else
+            r.col1 = MAX (used.col1, 0);
+        }
+      if (self->pointing)
+        {
+          g_signal_emit (self, signals[SIGNAL_POINT], 0, &r);
+          return;
+        }
+      gtk_widget_grab_focus (GTK_WIDGET (self));
+      tm_grid_select (self, &r);
+      return;
+    }
   gtk_widget_grab_focus (GTK_WIDGET (self));
-  if (y < HEADER_HEIGHT && x >= HEADER_WIDTH)
-    {
-      /* A column header selects the column's used part. */
-      TmRange r = { 0, col, 0, col };
-      TmRange used;
-      if (tm_sheet_used_range (self->sheet, &used))
-        r.row1 = MAX (used.row1, 0);
-      tm_grid_select (self, &r);
-      return;
-    }
-  if (x < HEADER_WIDTH && y >= HEADER_HEIGHT)
-    {
-      TmRange r = { row, 0, row, 0 };
-      TmRange used;
-      if (tm_sheet_used_range (self->sheet, &used))
-        r.col1 = MAX (used.col1, 0);
-      tm_grid_select (self, &r);
-      return;
-    }
 
   set_cursor (self, row, col, (state & GDK_SHIFT_MASK) != 0);
   self->dragging = TRUE;

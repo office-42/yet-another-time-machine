@@ -10,6 +10,7 @@
 #include "tm-file.h"
 #include "tm-eval.h"
 #include "tm-numfmt.h"
+#include "tm-sources.h"
 
 #include <math.h>
 #include <string.h>
@@ -301,7 +302,15 @@ update_panel (TmWindow *self)
   tm_chart_show (TM_CHART (self->chart), self->sheet, &sel);
 
   name = tm_range_name (&sel);
-  caption = cell_caption (self->sheet, sel.row0, sel.col0);
+  {
+    /* A selection that starts with a label -- "Storm lat" -- is named by
+     * it; otherwise by the label beside or above. */
+    const TmValue *first = tm_sheet_get_value (self->sheet, sel.row0, sel.col0);
+    gboolean range = sel.row0 != sel.row1 || sel.col0 != sel.col1;
+
+    caption = range && first->type == TM_VALUE_TEXT ? g_strdup (first->as.text)
+              : cell_caption (self->sheet, sel.row0, sel.col0);
+  }
   title = caption != NULL ? g_strdup_printf ("%s  ·  %s", name, caption) : g_strdup (name);
   gtk_label_set_text (GTK_LABEL (self->panel_title), title);
   g_free (title);
@@ -394,7 +403,7 @@ can_point (TmWindow *self)
     return FALSE;
   at = g_utf8_offset_to_pointer (text, caret);
   before = g_utf8_get_char (g_utf8_prev_char (at));
-  return strchr ("=(,;+-*/^&<>:", (int) before) != NULL && before != 0;
+  return before != 0 && before < 128 && strchr ("=(,;+-*/^&<>:", (int) before) != NULL;
 }
 
 static void
@@ -605,6 +614,8 @@ on_progress (int done, int total, gpointer data)
   return !self->stop_requested;
 }
 
+static void set_actions_enabled (TmWindow *self, gboolean enabled);
+
 void
 tm_window_simulate (TmWindow *self)
 {
@@ -620,6 +631,10 @@ tm_window_simulate (TmWindow *self)
 
   self->simulating = TRUE;
   self->stop_requested = FALSE;
+  /* Nothing but Stop while the futures run: the menus and shortcuts too,
+   * or a recalculation or a file opened mid-run would change the sheet
+   * under the simulation. */
+  set_actions_enabled (self, FALSE);
   gtk_widget_set_sensitive (self->content, FALSE);
   gtk_widget_set_visible (self->progress, TRUE);
   gtk_widget_set_visible (self->stop_button, TRUE);
@@ -631,15 +646,18 @@ tm_window_simulate (TmWindow *self)
   gtk_widget_set_visible (self->progress, FALSE);
   gtk_widget_set_visible (self->stop_button, FALSE);
   gtk_widget_set_sensitive (self->content, TRUE);
+  set_actions_enabled (self, TRUE);
   self->simulating = FALSE;
 
   sim = tm_sheet_get_sim (self->sheet);
   if (done && sim != NULL)
     {
       int n = tm_sim_n_tracked (sim);
-      msg = g_strdup_printf ("Simulated %d futures in %.2f s; %d uncertain cell%s.",
+      msg = g_strdup_printf ("Simulated %d futures in %.2f s; %d uncertain cell%s%s.",
                              tm_sim_iterations (sim), tm_sim_seconds (sim),
-                             n, n == 1 ? "" : "s");
+                             n, n == 1 ? "" : "s",
+                             tm_sheet_kept_all (self->sheet) ? ""
+                             : " kept (too many to keep all: the outputs and those SIM.* names)");
     }
   else
     msg = g_strdup ("Simulation stopped.");
@@ -758,13 +776,16 @@ on_paste_text (GObject *source, GAsyncResult *result, gpointer data)
 
       if (self->clip_cut)
         {
-          char **inputs = g_strdupv (self->clip_inputs);
-          tm_sheet_begin_undo (self->sheet);
-          tm_sheet_clear_range (self->sheet, &self->clip_range);
-          paste_inputs (self, inputs, rows, cols, FALSE, 0, 0);
-          tm_sheet_end_undo (self->sheet);
-          g_strfreev (inputs);
+          /* Moved, and every formula that names the cells -- theirs
+           * and the rest of the sheet's -- following them. */
+          TmRange sel, done;
+
+          tm_grid_get_selection (TM_GRID (self->grid), &sel);
+          tm_sheet_move_range (self->sheet, &self->clip_range, sel.row0, sel.col0);
+          done = (TmRange) { sel.row0, sel.col0, sel.row0 + rows - 1, sel.col0 + cols - 1 };
           clear_clip (self);
+          sheet_changed (self);
+          tm_grid_select (TM_GRID (self->grid), &done);
         }
       else
         paste_inputs (self, self->clip_inputs, rows, cols, TRUE,
@@ -985,6 +1006,13 @@ sync_settings (TmWindow *self)
 gboolean
 tm_window_load (TmWindow *self, const char *path, GError **error)
 {
+  /* An edit left unfinished belongs to the old model, not the new one. */
+  if (self->editing)
+    {
+      self->editing = FALSE;
+      self->point_start = self->point_end = -1;
+      mirror_edit (self);
+    }
   if (!tm_file_load (self->sheet, path, error))
     return FALSE;
   g_free (self->path);
@@ -1201,6 +1229,217 @@ action_export (GSimpleAction *a, GVariant *p, gpointer data)
   g_object_unref (dialog);
 }
 
+/* ---- Pictures and maps ------------------------------------------------ */
+
+static void
+on_import_done (GObject *source, GAsyncResult *result, gpointer data)
+{
+  TmWindow *self = data;
+  GFile *file = gtk_file_dialog_open_finish (GTK_FILE_DIALOG (source), result, NULL);
+
+  if (file != NULL)
+    {
+      char *path = g_file_get_path (file);
+      GError *error = NULL;
+      char *name = tm_sheet_load_source (self->sheet, path, NULL, &error);
+
+      if (name == NULL)
+        {
+          show_error (self, "The file could not be read.", error->message);
+          g_error_free (error);
+        }
+      else
+        {
+          char *msg = g_strdup_printf ("Loaded \"%s\": formulas can read it by that name, "
+                                       "as in =IMAGE.AT(\"%s\",0.5,0.5) or =MAP.REGION(\"%s\",lat,lon).",
+                                       name, name, name);
+          set_status (self, msg);
+          g_free (msg);
+          g_free (name);
+          sheet_changed (self);
+        }
+      g_free (path);
+      g_object_unref (file);
+    }
+  g_object_unref (self);
+}
+
+static void
+import_file (TmWindow *self, gboolean map)
+{
+  GtkFileDialog *dialog = gtk_file_dialog_new ();
+  GListStore *filters = g_list_store_new (GTK_TYPE_FILE_FILTER);
+  GtkFileFilter *f = gtk_file_filter_new ();
+
+  if (map)
+    {
+      gtk_file_filter_set_name (f, "GeoJSON maps");
+      gtk_file_filter_add_pattern (f, "*.geojson");
+      gtk_file_filter_add_pattern (f, "*.json");
+    }
+  else
+    {
+      gtk_file_filter_set_name (f, "Pictures");
+      gtk_file_filter_add_pixbuf_formats (f);
+    }
+  g_list_store_append (filters, f);
+  g_object_unref (f);
+  gtk_file_dialog_set_filters (dialog, G_LIST_MODEL (filters));
+  gtk_file_dialog_set_title (dialog, map ? "Import a Map" : "Import a Picture");
+  gtk_file_dialog_open (dialog, GTK_WINDOW (self), NULL, on_import_done, g_object_ref (self));
+  g_object_unref (filters);
+  g_object_unref (dialog);
+}
+
+static void
+action_import_picture (GSimpleAction *a, GVariant *p, gpointer data)
+{
+  import_file (TM_WINDOW (data), FALSE);
+}
+
+static void
+action_import_map (GSimpleAction *a, GVariant *p, gpointer data)
+{
+  import_file (TM_WINDOW (data), TRUE);
+}
+
+static void show_sources (TmWindow *self, GtkWindow *dialog);
+
+static void
+on_remove_source (GtkButton *button, TmWindow *self)
+{
+  const char *name = g_object_get_data (G_OBJECT (button), "source");
+
+  tm_sheet_remove_source (self->sheet, name);
+  sheet_changed (self);
+  show_sources (self, GTK_WINDOW (gtk_widget_get_root (GTK_WIDGET (button))));
+}
+
+/* "west south east north", as four numbers, or empty for none. */
+static void
+on_bounds_activate (GtkEntry *entry, TmWindow *self)
+{
+  const char *name = g_object_get_data (G_OBJECT (entry), "source");
+  TmImage *image = tm_sheet_get_image (self->sheet, name);
+  char **w = g_strsplit_set (gtk_editable_get_text (GTK_EDITABLE (entry)), " ,;\t", -1);
+  double b[4];
+  int k = 0;
+
+  if (image == NULL)
+    {
+      g_strfreev (w);
+      return;
+    }
+  for (int i = 0; w[i] != NULL && k < 4; i++)
+    if (*w[i] != '\0')
+      b[k++] = g_ascii_strtod (w[i], NULL);
+  g_strfreev (w);
+  if (k == 4 && b[2] > b[0] && b[3] > b[1])
+    {
+      image->has_bounds = TRUE;
+      image->west = b[0];
+      image->south = b[1];
+      image->east = b[2];
+      image->north = b[3];
+      set_status (self, "The picture's bounds are set: IMAGE.GEO can read it by place.");
+    }
+  else
+    {
+      image->has_bounds = FALSE;
+      set_status (self, "The picture has no bounds (type west south east north to give it some).");
+    }
+  tm_sheet_set_modified (self->sheet, TRUE);
+  sheet_changed (self);
+}
+
+/* The dialog's list of what is loaded, built afresh each time. */
+static void
+show_sources (TmWindow *self, GtkWindow *dialog)
+{
+  GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 10);
+  char **images = tm_sheet_image_names (self->sheet);
+  char **maps = tm_sheet_map_names (self->sheet);
+  GtkWidget *grid = gtk_grid_new ();
+  int row = 0;
+
+  gtk_widget_set_margin_start (box, 16);
+  gtk_widget_set_margin_end (box, 16);
+  gtk_widget_set_margin_top (box, 14);
+  gtk_widget_set_margin_bottom (box, 14);
+  gtk_grid_set_row_spacing (GTK_GRID (grid), 8);
+  gtk_grid_set_column_spacing (GTK_GRID (grid), 12);
+
+  if (images[0] == NULL && maps[0] == NULL)
+    gtk_box_append (GTK_BOX (box),
+                    gtk_label_new ("No pictures or maps yet: use Data > Import Picture or Import Map."));
+  for (int i = 0; images[i] != NULL; i++, row++)
+    {
+      TmImage *im = tm_sheet_get_image (self->sheet, images[i]);
+      char *info = g_strdup_printf ("<b>%s</b>\npicture, %d × %d", images[i], im->width, im->height);
+      GtkWidget *label = gtk_label_new (NULL), *entry = gtk_entry_new (), *remove;
+
+      gtk_label_set_markup (GTK_LABEL (label), info);
+      gtk_label_set_xalign (GTK_LABEL (label), 0);
+      gtk_grid_attach (GTK_GRID (grid), label, 0, row, 1, 1);
+      gtk_entry_set_placeholder_text (GTK_ENTRY (entry), "bounds: west south east north");
+      gtk_widget_set_tooltip_text (entry, "Longitudes of the left and right edges, latitudes of the "
+                                          "bottom and top; Enter to set");
+      if (im->has_bounds)
+        {
+          char *b = g_strdup_printf ("%g %g %g %g", im->west, im->south, im->east, im->north);
+          gtk_editable_set_text (GTK_EDITABLE (entry), b);
+          g_free (b);
+        }
+      gtk_widget_set_hexpand (entry, TRUE);
+      g_object_set_data_full (G_OBJECT (entry), "source", g_strdup (images[i]), g_free);
+      g_signal_connect (entry, "activate", G_CALLBACK (on_bounds_activate), self);
+      gtk_grid_attach (GTK_GRID (grid), entry, 1, row, 1, 1);
+      remove = gtk_button_new_with_label ("Remove");
+      g_object_set_data_full (G_OBJECT (remove), "source", g_strdup (images[i]), g_free);
+      g_signal_connect (remove, "clicked", G_CALLBACK (on_remove_source), self);
+      gtk_grid_attach (GTK_GRID (grid), remove, 2, row, 1, 1);
+      g_free (info);
+    }
+  for (int i = 0; maps[i] != NULL; i++, row++)
+    {
+      TmMap *map = tm_sheet_get_map (self->sheet, maps[i]);
+      char *info = g_strdup_printf ("<b>%s</b>\nmap, %u regions", maps[i], map->features->len);
+      GtkWidget *label = gtk_label_new (NULL), *path, *remove;
+
+      gtk_label_set_markup (GTK_LABEL (label), info);
+      gtk_label_set_xalign (GTK_LABEL (label), 0);
+      gtk_grid_attach (GTK_GRID (grid), label, 0, row, 1, 1);
+      path = gtk_label_new (tm_sheet_source_path (self->sheet, maps[i]));
+      gtk_label_set_ellipsize (GTK_LABEL (path), PANGO_ELLIPSIZE_START);
+      gtk_widget_add_css_class (path, "dim-label");
+      gtk_widget_set_hexpand (path, TRUE);
+      gtk_label_set_xalign (GTK_LABEL (path), 0);
+      gtk_grid_attach (GTK_GRID (grid), path, 1, row, 1, 1);
+      remove = gtk_button_new_with_label ("Remove");
+      g_object_set_data_full (G_OBJECT (remove), "source", g_strdup (maps[i]), g_free);
+      g_signal_connect (remove, "clicked", G_CALLBACK (on_remove_source), self);
+      gtk_grid_attach (GTK_GRID (grid), remove, 2, row, 1, 1);
+      g_free (info);
+    }
+  gtk_box_append (GTK_BOX (box), grid);
+  gtk_window_set_child (dialog, box);
+  g_strfreev (images);
+  g_strfreev (maps);
+}
+
+static void
+action_sources (GSimpleAction *a, GVariant *p, gpointer data)
+{
+  TmWindow *self = data;
+  GtkWidget *win = gtk_window_new ();
+
+  gtk_window_set_title (GTK_WINDOW (win), "Pictures and Maps");
+  gtk_window_set_transient_for (GTK_WINDOW (win), GTK_WINDOW (self));
+  gtk_window_set_default_size (GTK_WINDOW (win), 620, 260);
+  show_sources (self, GTK_WINDOW (win));
+  gtk_window_present (GTK_WINDOW (win));
+}
+
 static void
 action_new (GSimpleAction *a, GVariant *p, gpointer data)
 {
@@ -1222,8 +1461,8 @@ action_functions (GSimpleAction *a, GVariant *p, gpointer data)
   int n;
   const TmFunction *const *list = tm_function_list (&n);
   static const char *const order[] = {
-    "Random", "Processes", "Simulation", "Forecasting", "Judgment",
-    "Sports", "Markets",
+    "Random", "Processes", "Simulation", "Forecasting", "Learning", "Updating",
+    "Scoring", "Survival", "Judgment", "Sports", "Markets", "Images", "Geography", "Maps",
     "Statistics", "Distributions", "Maths", "Logic", "Text", "Lookup", "Finance"
   };
 
@@ -1310,7 +1549,21 @@ static const GActionEntry WIN_ACTIONS[] = {
   { "fewer-decimals", action_decimals, NULL, NULL, NULL, { 0 } },
   { "functions", action_functions, NULL, NULL, NULL, { 0 } },
   { "about", action_about, NULL, NULL, NULL, { 0 } },
+  { "import-picture", action_import_picture, NULL, NULL, NULL, { 0 } },
+  { "import-map", action_import_map, NULL, NULL, NULL, { 0 } },
+  { "sources", action_sources, NULL, NULL, NULL, { 0 } },
 };
+
+static void
+set_actions_enabled (TmWindow *self, gboolean enabled)
+{
+  for (guint i = 0; i < G_N_ELEMENTS (WIN_ACTIONS); i++)
+    {
+      GAction *action = g_action_map_lookup_action (G_ACTION_MAP (self), WIN_ACTIONS[i].name);
+      if (action != NULL)
+        g_simple_action_set_enabled (G_SIMPLE_ACTION (action), enabled);
+    }
+}
 
 /* ---- Building the window ---------------------------------------------- */
 
@@ -1350,7 +1603,18 @@ build_menu (void)
     g_menu_append_section (examples, NULL, G_MENU_MODEL (part));
     g_object_unref (part);
     part = g_menu_new ();
+    ADD (part, "Project overruns: learning from past cases (analogues, regression)", "win.open-example::analogues.tm", NULL);
+    ADD (part, "A/B test: rates learnt from counts (Bayes, pooling)", "win.open-example::abtest.tm", NULL);
+    ADD (part, "Pump lifetimes: some still running (Weibull, Kaplan-Meier)", "win.open-example::lifetimes.tm", NULL);
     ADD (part, "Forecasting tournament (Brier scores, Bayes)", "win.open-example::judgment.tm", NULL);
+    g_menu_append_section (examples, NULL, G_MENU_MODEL (part));
+    g_object_unref (part);
+    part = g_menu_new ();
+    ADD (part, "Rain radar: the next hour (motion from two frames)", "win.open-example::nowcast.tm", NULL);
+    ADD (part, "Wildfire: where will it spread? (land-cover picture)", "win.open-example::wildfire.tm", NULL);
+    ADD (part, "Hurricane track: which coasts? (world map)", "win.open-example::storm.tm", NULL);
+    ADD (part, "Rain between gauges (kriging)", "win.open-example::gauges.tm", NULL);
+    ADD (part, "Crop canopy from photographs (green cover)", "win.open-example::crops.tm", NULL);
     g_menu_append_section (examples, NULL, G_MENU_MODEL (part));
     g_object_unref (part);
   }
@@ -1410,6 +1674,19 @@ build_menu (void)
   g_menu_append_section (m, NULL, G_MENU_MODEL (section));
   g_object_unref (section);
   g_menu_append_submenu (bar, "F_ormat", G_MENU_MODEL (m));
+  g_object_unref (m);
+
+  m = g_menu_new ();
+  section = g_menu_new ();
+  ADD (section, "Import _Picture…", "win.import-picture", NULL);
+  ADD (section, "Import _Map (GeoJSON)…", "win.import-map", NULL);
+  g_menu_append_section (m, NULL, G_MENU_MODEL (section));
+  g_object_unref (section);
+  section = g_menu_new ();
+  ADD (section, "Pictures and Maps…", "win.sources", NULL);
+  g_menu_append_section (m, NULL, G_MENU_MODEL (section));
+  g_object_unref (section);
+  g_menu_append_submenu (bar, "_Data", G_MENU_MODEL (m));
   g_object_unref (m);
 
   m = g_menu_new ();
@@ -1633,12 +1910,12 @@ tm_window_init (TmWindow *self)
   gtk_widget_set_tooltip_text (run, "Run the model through thousands of possible futures (F5)");
   gtk_actionable_set_action_name (GTK_ACTIONABLE (run), "win.simulate");
   gtk_box_append (GTK_BOX (toolbar), run);
-  self->iter_spin = gtk_spin_button_new_with_range (100, 1000000, 1000);
+  self->iter_spin = gtk_spin_button_new_with_range (10, 1000000, 1000);
   gtk_spin_button_set_value (GTK_SPIN_BUTTON (self->iter_spin), tm_sheet_iterations (self->sheet));
   gtk_widget_set_tooltip_text (self->iter_spin, "How many futures to simulate; the error in their mean shrinks as one over its square root");
   g_signal_connect (self->iter_spin, "value-changed", G_CALLBACK (on_iterations_changed), self);
   gtk_box_append (GTK_BOX (toolbar), labelled ("Futures", self->iter_spin));
-  self->seed_spin = gtk_spin_button_new_with_range (0, 4294967295.0, 1);
+  self->seed_spin = gtk_spin_button_new_with_range (0, 9007199254740991.0, 1);
   gtk_spin_button_set_value (GTK_SPIN_BUTTON (self->seed_spin), (double) tm_sheet_seed (self->sheet));
   gtk_widget_set_tooltip_text (self->seed_spin, "The same seed gives the same futures");
   g_signal_connect (self->seed_spin, "value-changed", G_CALLBACK (on_seed_changed), self);

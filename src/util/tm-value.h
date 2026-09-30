@@ -78,6 +78,9 @@ int      tm_value_compare   (const TmValue *a, const TmValue *b);
 /* What a user typed, read as a constant: "12", "1e3", "45%", "TRUE",
  * "#N/A", or else text.  A leading apostrophe forces text. */
 TmValue  tm_value_parse_input (const char *input);
+/* A number typed with a currency sign in front or thousands separators
+ * ("$1,234.50"), without them ("1234.50"); NULL if it has neither. */
+char    *tm_number_plain (const char *text);
 /* A number the way the General format shows it: up to eleven significant
  * digits, no trailing zeros, exponent only when it must. */
 char    *tm_number_format_general (double number);

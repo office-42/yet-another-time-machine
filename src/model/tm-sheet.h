@@ -14,6 +14,8 @@
 
 #include "tm-value.h"
 #include "tm-sim.h"
+#include "tm-image.h"
+#include "tm-geo.h"
 
 G_BEGIN_DECLS
 
@@ -70,6 +72,10 @@ void     tm_sheet_foreach_format (TmSheet *sheet, TmCellFunc func, gpointer data
 /* Copies the cells of src so that its top left lands at (row, col), each
  * formula's relative references moved with it. */
 void     tm_sheet_copy_range (TmSheet *sheet, const TmRange *src, int row, int col);
+/* Cut and paste: the cells of src moved so that its top left lands at
+ * (row, col), and every reference to them, here or elsewhere, moved
+ * along -- as a spreadsheet moves cells. */
+void     tm_sheet_move_range (TmSheet *sheet, const TmRange *src, int row, int col);
 /* Fill Down and Fill Right: the first row (or column) of range copied
  * into the rest of it. */
 void     tm_sheet_fill_down  (TmSheet *sheet, const TmRange *range);
@@ -125,9 +131,28 @@ typedef gboolean (*TmSimProgress) (int done, int total, gpointer data);
  * names, then recalculates so that those functions see the new results.
  * The same seed gives the same futures.  Returns FALSE if stopped. */
 gboolean tm_sheet_simulate (TmSheet *sheet, TmSimProgress progress, gpointer data);
+/* FALSE if the last simulation had too many uncertain cells to keep every
+ * one's futures, and kept only those SIM.* names and the model's outputs. */
+gboolean tm_sheet_kept_all (TmSheet *sheet);
 
 /* The last simulation, or NULL.  Owned by the sheet. */
 TmSim   *tm_sheet_get_sim (TmSheet *sheet);
+
+/* ---- Data sources ----------------------------------------------------- */
+
+/* Pictures and maps, loaded from files and named, for formulas to read:
+ * =IMAGE.AT("radar", 0.5, 0.5), =MAP.REGION("world", B2, C2).  Names are
+ * the same whatever their case.  The sheet takes the image or map; path
+ * is where it came from, which is what the file saves. */
+void        tm_sheet_add_image   (TmSheet *sheet, const char *name, TmImage *image, const char *path);
+void        tm_sheet_add_map     (TmSheet *sheet, const char *name, TmMap *map, const char *path);
+TmImage    *tm_sheet_get_image   (TmSheet *sheet, const char *name);
+TmMap      *tm_sheet_get_map     (TmSheet *sheet, const char *name);
+const char *tm_sheet_source_path (TmSheet *sheet, const char *name);
+gboolean    tm_sheet_remove_source (TmSheet *sheet, const char *name);
+/* The names, sorted; free with g_strfreev. */
+char      **tm_sheet_image_names (TmSheet *sheet);
+char      **tm_sheet_map_names   (TmSheet *sheet);
 
 /* Whether the sheet has changed since it was last saved. */
 gboolean tm_sheet_modified     (TmSheet *sheet);

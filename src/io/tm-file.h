@@ -10,12 +10,16 @@
  *     iterations	10000
  *     seed	1
  *     width	A	160
+ *     image	radar	radar.png	-5	50	2	55
+ *     map	world	world.geojson
  *     format	B1	#,##0
  *     cell	A1	Revenue
  *     cell	B1	=RAND.PERT(80,100,150)
  *
  * Fields are separated by tabs; a tab, a newline or a backslash in a cell
- * is written \t, \n or \\.  CSV is read and written too, for history
+ * is written \t, \n or \\.  Pictures and maps are named files beside
+ * the model, their paths relative to its folder; a picture may carry the
+ * longitudes and latitudes of its west, south, east and north edges.  CSV is read and written too, for history
  * coming in from elsewhere and results going out.
  */
 

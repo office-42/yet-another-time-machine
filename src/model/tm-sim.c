@@ -8,6 +8,7 @@
 #include "tm-stats.h"
 
 #include <math.h>
+#include <string.h>
 #include <stdlib.h>
 
 typedef struct {
@@ -24,7 +25,15 @@ struct _TmSim {
   double      seconds;
   gboolean    stale;
   GHashTable *series;    /* key -> Series */
+  /* Futures that came out as text -- a state, a team, a country -- kept
+   * as NaNs whose spare bits number the text here. */
+  GPtrArray  *labels;
+  GHashTable *label_index;   /* text -> its number + 1 */
 };
+
+/* A quiet NaN, sign clear, the text's number + 1 in the 51 bits below. */
+#define LABEL_BITS 0x7ff8000000000000ULL
+#define LABEL_MASK 0x0007ffffffffffffULL
 
 static void
 series_free (gpointer p)
@@ -46,7 +55,98 @@ tm_sim_new (int iterations, guint64 seed, gboolean latin)
   sim->seed = seed;
   sim->latin = latin;
   sim->series = g_hash_table_new_full (g_int64_hash, g_int64_equal, g_free, series_free);
+  sim->labels = g_ptr_array_new_with_free_func (g_free);
+  sim->label_index = g_hash_table_new (g_str_hash, g_str_equal);
   return sim;
+}
+
+double
+tm_sim_label_sample (TmSim *sim, const char *text)
+{
+  guint64 i = GPOINTER_TO_SIZE (g_hash_table_lookup (sim->label_index, text));
+  union { guint64 u; double d; } bits;
+
+  if (i == 0)
+    {
+      char *copy = g_strdup (text);
+      g_ptr_array_add (sim->labels, copy);
+      i = sim->labels->len;
+      g_hash_table_insert (sim->label_index, copy, GSIZE_TO_POINTER ((gsize) i));
+    }
+  bits.u = LABEL_BITS | i;
+  return bits.d;
+}
+
+const char *
+tm_sim_sample_label (const TmSim *sim, double sample)
+{
+  union { double d; guint64 u; } bits = { sample };
+  guint64 i;
+
+  if (sim == NULL || (bits.u & ~LABEL_MASK) != LABEL_BITS)
+    return NULL;
+  i = bits.u & LABEL_MASK;
+  return i >= 1 && i <= sim->labels->len ? g_ptr_array_index (sim->labels, i - 1) : NULL;
+}
+
+typedef struct {
+  const char *label;
+  int         count;
+} Category;
+
+static int
+by_count (const void *pa, const void *pb)
+{
+  const Category *a = pa, *b = pb;
+
+  if (a->count != b->count)
+    return b->count - a->count;
+  return strcmp (a->label, b->label);
+}
+
+int
+tm_sim_categories (TmSim *sim, int row, int col, const char ***labels, int **counts)
+{
+  int n;
+  const double *x = tm_sim_samples (sim, row, col, FALSE, &n);
+  GHashTable *seen;
+  GArray *cats;
+  int k;
+
+  *labels = NULL;
+  *counts = NULL;
+  if (x == NULL)
+    return 0;
+  seen = g_hash_table_new (g_str_hash, g_str_equal);
+  cats = g_array_new (FALSE, FALSE, sizeof (Category));
+  for (int i = 0; i < n; i++)
+    {
+      const char *label = tm_sim_sample_label (sim, x[i]);
+      gpointer at;
+
+      if (label == NULL)
+        continue;
+      if ((at = g_hash_table_lookup (seen, label)) == NULL)
+        {
+          Category c = { label, 0 };
+          g_array_append_val (cats, c);
+          at = GSIZE_TO_POINTER ((gsize) cats->len);
+          g_hash_table_insert (seen, (gpointer) label, at);
+        }
+      g_array_index (cats, Category, GPOINTER_TO_SIZE (at) - 1).count++;
+    }
+  g_hash_table_destroy (seen);
+  qsort (cats->data, cats->len, sizeof (Category), by_count);
+  k = cats->len;
+  *labels = g_new (const char *, MAX (k, 1));
+  *counts = g_new (int, MAX (k, 1));
+  for (int i = 0; i < k; i++)
+    {
+      (*labels)[i] = g_array_index (cats, Category, i).label;
+      (*counts)[i] = g_array_index (cats, Category, i).count;
+    }
+  g_array_free (cats, TRUE);
+  return k;
 }
 
 void
@@ -55,6 +155,8 @@ tm_sim_free (TmSim *sim)
   if (sim == NULL)
     return;
   g_hash_table_destroy (sim->series);
+  g_hash_table_destroy (sim->label_index);
+  g_ptr_array_free (sim->labels, TRUE);
   g_free (sim);
 }
 

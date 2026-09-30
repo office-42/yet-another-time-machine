@@ -67,7 +67,7 @@ fit_line (const double *y, const double *x, guint n, LineFit *fit, TmValue *err)
   fit->mean_x = mx;
   fit->sxx = sxx;
   fit->sse = MAX (0.0, syy - fit->slope * sxy);
-  fit->r2 = syy == 0 ? 1 : (sxy * sxy) / (sxx * syy);
+  fit->r2 = syy == 0 ? NAN : (sxy * sxy) / (sxx * syy);   /* Excel: #DIV/0! */
   return TRUE;
 }
 
@@ -129,7 +129,7 @@ fn_rsq (TmEvalContext *ctx, TmArg *args, int n)
 
   if (!fit_args (ctx, &args[0], &args[1], FALSE, &fit, &err))
     return err;
-  return tm_value_number (fit.r2);
+  return isnan (fit.r2) ? tm_value_error (TM_ERR_DIV0) : tm_value_number (fit.r2);
 }
 
 static TmValue
@@ -187,13 +187,19 @@ fn_growth (TmEvalContext *ctx, TmArg *args, int n)
 
 /* The line's forecast plus a draw from its prediction error: Student's t
  * with n - 2 degrees of freedom, scaled by the standard error of a new
- * observation at x, s sqrt(1 + 1/n + (x - mean)^2 / Sxx). */
+ * observation at x, s sqrt(1 + 1/n + (x - mean)^2 / Sxx).  Of that error,
+ * the part that comes from the line itself being uncertain -- its height,
+ * its slope, the scatter -- is shared by every cell drawing from the same
+ * line in a future, so that a row of forecasts forms one possible line,
+ * not a cloud of points each from a different one; only the scatter about
+ * the line is each cell's own. */
 static TmValue
 fn_rand_linear (TmEvalContext *ctx, TmArg *args, int n)
 {
   TmValue err;
   LineFit fit;
-  double x, s, se, u;
+  double x, s, w, za, zb;
+  TmRng rng;
 
   ARG_NUM (0, x);
   if (!fit_args (ctx, &args[1], &args[2], FALSE, &fit, &err))
@@ -201,11 +207,16 @@ fn_rand_linear (TmEvalContext *ctx, TmArg *args, int n)
   if (fit.n < 3)
     return tm_value_error (TM_ERR_DIV0);
   s = sqrt (fit.sse / (fit.n - 2));
-  se = s * sqrt (1 + 1.0 / fit.n + (x - fit.mean_x) * (x - fit.mean_x) / fit.sxx);
-  if (stratified (ctx, &u))
-    return tm_value_number (fit.intercept + fit.slope * x + se * tm_t_inv (u, fit.n - 2));
+  {
+    double key[7] = { 2, fit.intercept, fit.slope, fit.mean_x, fit.sxx, fit.sse, fit.n };
+    shared_rng (ctx, key, 7, &rng);
+  }
+  w = draw_scale (&rng, fit.n - 2);
+  za = tm_rng_normal (&rng);
+  zb = tm_rng_normal (&rng);
   return tm_value_number (fit.intercept + fit.slope * x
-                          + se * tm_rng_student_t (ctx->rng, fit.n - 2));
+                          + s * w * (za / sqrt (fit.n) + zb * (x - fit.mean_x) / sqrt (fit.sxx)
+                                     + draw_normal (ctx)));
 }
 
 static TmValue
@@ -662,7 +673,30 @@ fn_rand_ets (TmEvalContext *ctx, TmArg *args, int n)
   if (!ets_steps (ctx, &args[0], fit, &h, &err))
     return err;
   ets_forecast (fit, h, &mean, &se);
-  return tm_value_number (mean + se * draw_normal (ctx));
+  /* The innovations of steps 1 to h, the same for every cell forecasting
+   * this series in this future: step h's error is its own innovation
+   * plus each earlier one's, carried forward by the smoothing -- so that
+   * the months of a forecast run high or low together, as they do, and a
+   * year's total is as uncertain as it should be. */
+  {
+    int hi = MAX (1, (int) ceil (h - 1e-9)), m = fit->period;
+    double a = fit->alpha, b = fit->alpha * fit->beta, g = fit->gamma * (1 - fit->alpha);
+    double key[9] = { 1, fit->level, fit->trend, fit->sigma2, fit->alpha, fit->beta,
+                      fit->gamma, fit->t_last, fit->period };
+    double e = 0;
+    TmRng rng;
+
+    if (h > 100000)
+      return tm_value_error (TM_ERR_NUM);
+    shared_rng (ctx, key, 9, &rng);
+    for (int j = 1; j <= hi; j++)
+      {
+        int lag = hi - j;
+        double c = lag == 0 ? 1 : a + b * lag + (m > 0 && lag % m == 0 ? g : 0);
+        e += c * tm_rng_normal (&rng);
+      }
+    return tm_value_number (mean + sqrt (fit->sigma2) * e);
+  }
 }
 
 static TmValue

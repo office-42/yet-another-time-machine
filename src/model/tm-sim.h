@@ -42,6 +42,15 @@ TmRef   *tm_sim_cells      (const TmSim *sim, int *n);
  * sorted, only the numbers, ascending.  NULL if the cell was not kept. */
 const double *tm_sim_samples (TmSim *sim, int row, int col, gboolean sorted, int *n);
 
+/* A future that came out as text is kept as a NaN carrying the text's
+ * number in the simulation's list: the sample for text, and the text of
+ * a sample, NULL if it is a number or no value at all. */
+double       tm_sim_label_sample (TmSim *sim, const char *text);
+const char  *tm_sim_sample_label (const TmSim *sim, double sample);
+/* The texts a cell's futures came out as, commonest first, and how many
+ * futures each; the arrays to g_free, the texts borrowed. */
+int          tm_sim_categories (TmSim *sim, int row, int col, const char ***labels, int **counts);
+
 /* Spearman's rank correlation between two cells across the futures:
  * how much one moves with the other.  NaN if either was not kept or does
  * not vary. */

@@ -5,6 +5,7 @@
  */
 
 #include "tm-rng.h"
+#include "tm-stats.h"
 
 #include <math.h>
 
@@ -54,8 +55,10 @@ tm_rng_next (TmRng *rng)
 double
 tm_rng_uniform (TmRng *rng)
 {
-  /* The top 53 bits, shifted half a step off zero: (k + 0.5) / 2^53. */
-  return ((double) (tm_rng_next (rng) >> 11) + 0.5) * (1.0 / 9007199254740992.0);
+  /* The top 53 bits, shifted half a step off zero: (k + 0.5) / 2^53 --
+   * which for the very top k rounds to 1, and so is kept just below. */
+  double u = ((double) (tm_rng_next (rng) >> 11) + 0.5) * (1.0 / 9007199254740992.0);
+  return u < 1.0 ? u : 0x1.fffffffffffffp-1;
 }
 
 gint64
@@ -254,12 +257,9 @@ tm_rng_binomial (TmRng *rng, gint64 n, double p)
     }
   else
     {
-      /* With thirty expected successes or more the normal approximation,
-       * rounded and clamped, is within a whisker of the real thing. */
-      double mean = (double) n * p, sd = sqrt (mean * (1.0 - p));
-
-      k = (gint64) floor (mean + sd * tm_rng_normal (rng) + 0.5);
-      k = CLAMP (k, 0, n);
+      /* With many expected successes, the exact distribution function
+       * inverted at a uniform: a few incomplete beta functions. */
+      k = (gint64) tm_binomial_inv (tm_rng_uniform (rng), (double) n, p);
     }
 
   return flip ? n - k : k;

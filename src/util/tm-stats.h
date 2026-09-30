@@ -25,6 +25,13 @@ double tm_correlation (const double *x, const double *y, int n);
 
 int    tm_compare_doubles (const void *a, const void *b);
 
+/* The continuous ranked probability score of a forecast given as m sorted
+ * samples, once y happened: the mean distance from the samples to y, less
+ * half their mean distance from each other.  In y's units; lower is
+ * better; for a single number it is the absolute error.  fair: the
+ * unbiased version, for comparing ensembles of different sizes. */
+double tm_crps_sorted (const double *sorted, int m, double y, gboolean fair);
+
 /* ---- Distribution functions and their inverses ------------------------ *
  *
  * Latin hypercube sampling draws each input through its inverse

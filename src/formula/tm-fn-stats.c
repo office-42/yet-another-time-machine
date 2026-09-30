@@ -361,17 +361,26 @@ fn_poisson_dist (TmEvalContext *ctx, TmArg *args, int n)
   x = floor (x);
   if (x < 0 || mean < 0)
     return tm_value_error (TM_ERR_NUM);
+  if (mean == 0)
+    return tm_value_number (cumulative || x == 0 ? 1 : 0);
   if (!cumulative)
     return tm_value_number (exp (x * log (mean) - mean - lgamma (x + 1)));
-  {
-    double term = exp (-mean), sum = term;
-    for (int k = 1; k <= (int) x; k++)
-      {
-        term *= mean / k;
-        sum += term;
-      }
-    return tm_value_number (MIN (sum, 1.0));
-  }
+  /* Far above the mean there is nothing left above x. */
+  if (x > mean + 40 * sqrt (mean) + 100)
+    return tm_value_number (1);
+  /* Term by term while e^-mean does not underflow; past that, through
+   * the incomplete gamma function: P(X <= x) = Q(x + 1, mean). */
+  if (mean < 700)
+    {
+      double term = exp (-mean), sum = term;
+      for (double k = 1; k <= x; k++)
+        {
+          term *= mean / k;
+          sum += term;
+        }
+      return tm_value_number (MIN (sum, 1.0));
+    }
+  return tm_value_number (1 - tm_gamma_p (x + 1, mean));
 }
 
 static TmValue
@@ -389,25 +398,16 @@ fn_binom_dist (TmEvalContext *ctx, TmArg *args, int n)
   trials = floor (trials);
   if (k < 0 || k > trials || p < 0 || p > 1)
     return tm_value_error (TM_ERR_NUM);
-  {
-    double sum = 0;
-    int from = cumulative ? 0 : (int) k;
-
-    for (int j = from; j <= (int) k; j++)
-      {
-        double lc = lgamma (trials + 1) - lgamma (j + 1.0) - lgamma (trials - j + 1);
-        double term;
-
-        if (p == 0)
-          term = j == 0 ? 1 : 0;
-        else if (p == 1)
-          term = j == trials ? 1 : 0;
-        else
-          term = exp (lc + j * log (p) + (trials - j) * log1p (-p));
-        sum += term;
-      }
-    return tm_value_number (MIN (sum, 1.0));
-  }
+  if (p == 0 || p == 1)
+    {
+      double certain = p == 0 ? 0 : trials;
+      return tm_value_number (cumulative ? (k >= certain) : (k == certain));
+    }
+  if (!cumulative)
+    return tm_value_number (exp (lgamma (trials + 1) - lgamma (k + 1) - lgamma (trials - k + 1)
+                                 + k * log (p) + (trials - k) * log1p (-p)));
+  /* P(X <= k) = I_{1-p}(n - k, k + 1). */
+  return tm_value_number (k >= trials ? 1 : tm_beta_inc (trials - k, k + 1, 1 - p));
 }
 
 static TmValue

@@ -4,8 +4,8 @@ What exists, and what comes next, roughly in order.
 
 ## Done
 
-- Engine: values, a parser with Excel's precedence, on-demand
-  recalculation with cycle detection, and over 120 functions.
+- Engine: values, a parser with Excel's precedence, recalculation with
+  cycle detection, and 249 functions.
 - Random inputs: uniform, normal, lognormal, triangular, PERT, beta,
   gamma, exponential, Poisson, binomial, Bernoulli, Student's t, 90%
   ranges (normal and lognormal), discrete, bootstrap and GBM.
@@ -47,17 +47,47 @@ What exists, and what comes next, roughly in order.
   Examples for weather, football and stock prices come with them.
 - Cells that cannot be random are frozen during a simulation.
 - Terminal front-end and smoke test; CI on Linux.
+- Pictures and maps as data: PNG and JPEG pictures, located or not, read
+  by position, place or colour legend, measured, and compared frame to
+  frame; GeoJSON maps with regions, areas and distances; interpolation
+  between stations (inverse distance, ordinary kriging with its error);
+  a stochastic spread over a grid. The forecast panel draws maps, tracks,
+  clouds of positions and heat maps. Examples: radar nowcast, wildfire,
+  hurricane track, rain gauges, crop canopy.
+- Learning from a table of past cases: nearest analogues, multiple,
+  logistic, Poisson and quantile regression, conformal intervals.
+- Updating: beta-binomial and gamma-Poisson draws, partial pooling,
+  Student-t predictive draws, kernel density estimates, empirical
+  distributions, generalised Pareto tails.
+- Lifetimes: Weibull fits with censoring, Kaplan–Meier, conditional
+  lifetimes, Gott's rule; queues (Erlang C).
+- Correlated inputs through a Gaussian copula, and forecast errors shared
+  across a series' months.
+- Scoring (CRPS, PIT, interval and quantile scores, MASE, recalibration,
+  Cooke's calibration) and decisions (chance each option is best, EVPI,
+  EVPPI, certainty equivalents, Sobol indices).
+- Text outcomes in simulations: `SIM.PROB` of a word, `SIM.MODE`, bar
+  charts.
+- Evaluation in dependency order, so long chains neither overflow the
+  stack nor read as cycles; a sample budget that keeps the outputs.
+- Cut and paste that moves references; numbers typed with currency signs
+  and thousands separators.
 
 ## Next
 
-- **Correlated inputs**, through the Iman–Conover rank reordering.
-- **More forecasting**: fitting logistic and Bass curves to data, block
-  bootstrap of a series, multiplicative Holt–Winters, ARIMA.
+- **Correlated inputs by rank**: Iman–Conover reordering, which keeps
+  Latin hypercube strata.
+- **More forecasting**: fitting logistic and Bass curves to data by
+  nonlinear least squares, block bootstrap of a series, multiplicative
+  Holt–Winters with model selection, ARIMA, Gaussian processes.
+- **Joint spatial draws**: conditional simulation, so that kriged fields
+  are consistent from place to place.
 - **More domains**: ranking models for elections (polls to vote shares),
-  survival curves for durations, queueing for service times.
-- **More judgment**: Beta-binomial base rates, Gott's rule, and
-  calibration tables.
+  agent-based spread on networks.
+- **Stacking and pooling of models**: weights from past scores.
 - **Convergence**: stopping automatically once the chosen statistics are
   known to a tolerance.
-- Named ranges; more than one sheet.
+- Named ranges, lookups (`VLOOKUP`, `MATCH`), dates; inserting rows and
+  columns; more than one sheet.
+- Running the simulation off the main thread.
 - macOS and Windows builds.

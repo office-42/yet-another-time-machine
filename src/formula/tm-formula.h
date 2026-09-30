@@ -79,10 +79,15 @@ char   *tm_formula_print (const TmNode *node, int drow, int dcol);
 
 /* The same, from and to the text a user typed ("=A1+1" to "=A2+1"). */
 char   *tm_formula_shift (const char *input, int drow, int dcol);
+/* What moving the cells of from by (drow, dcol) does to a formula that
+ * names them: references into from, absolute or not, follow the cells;
+ * a range follows only if it lies wholly inside.  NULL if the formula
+ * names none of them. */
+char   *tm_formula_move (const char *input, const TmRange *from, int drow, int dcol);
 
-/* Calls func on every reference and range the formula names, including
- * the first argument of each call to a function whose name starts with
- * prefix when prefix is not NULL (and only those, then). */
+/* Calls func on every reference and range the formula names, or, when
+ * prefix is not NULL, only on those among the arguments of a call to a
+ * function whose name starts with it. */
 typedef void (*TmRangeFunc) (const TmRange *range, gpointer data);
 void    tm_formula_foreach_range (const TmNode *node, const char *prefix,
                                   TmRangeFunc func, gpointer data);

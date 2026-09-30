@@ -14,6 +14,8 @@
 #include "tm-formula.h"
 #include "tm-rng.h"
 #include "tm-stats.h"
+#include "tm-image.h"
+#include "tm-geo.h"
 
 G_BEGIN_DECLS
 
@@ -27,10 +29,24 @@ struct _TmEvalContext {
    * NaN where an iteration gave no number, or -- if sorted -- only the
    * numbers, in ascending order.  NULL if there are none. */
   const double  *(*samples) (gpointer data, int row, int col, gboolean sorted, int *n);
+  /* The text a sample stands for, when that future came out as text; NULL
+   * for a number. */
+  const char    *(*sample_label) (gpointer data, double sample);
   /* Under Latin hypercube sampling, the next stratified uniform for the
    * cell being worked out; FALSE under plain Monte Carlo, when a random
    * function draws from rng with its own sampler instead. */
   gboolean       (*stratified) (gpointer data, double *u);
+  /* The pictures and maps loaded as data, by name; NULL if there is none
+   * of that name. */
+  const TmImage *(*image) (gpointer data, const char *name);
+  const TmMap   *(*map)   (gpointer data, const char *name);
+  /* Seeds rng for a random field that many cells share -- a fire's spread
+   * over a map, read cell by cell -- so that within one future every cell
+   * sees the same field: the same key and the same draw, the same seed. */
+  void           (*shared_stream) (gpointer data, guint64 key, TmRng *rng);
+  /* A number that changes whenever the sheet is worked out again, so that
+   * a function may keep what it computed until then. */
+  guint          (*generation) (gpointer data);
   gpointer data;
 
   TmRng   *rng;
@@ -110,6 +126,14 @@ const TmValue **tm_arg_cells (TmEvalContext *ctx, const TmArg *arg, int *n);
 gboolean tm_arg_pairs (TmEvalContext *ctx, const TmArg *ys, const TmArg *xs,
                        GArray *y_out, GArray *x_out, TmValue *err);
 
+/* Ranges of one size read side by side, as the columns of a table: row i
+ * is kept when every range has a number there, TRUE and FALSE counting as
+ * 1 and 0 for columns of events.  cols[j] gets the j'th range's numbers,
+ * *n of them, to free with g_free.  #N/A if the sizes differ; an error in
+ * any cell is the answer. */
+gboolean tm_arg_columns (TmEvalContext *ctx, const TmArg *const *args, int k,
+                         double **cols, int *n, TmValue *err);
+
 /* COUNTIF-style criteria: ">=10", "<>0", "5", "apple". */
 typedef struct {
   TmOp    op;
@@ -132,5 +156,11 @@ extern const TmFunction tm_fn_sim[];
 extern const int        tm_fn_sim_count;
 extern const TmFunction tm_fn_domains[];
 extern const int        tm_fn_domains_count;
+extern const TmFunction tm_fn_spatial[];
+extern const int        tm_fn_spatial_count;
+extern const TmFunction tm_fn_learn[];
+extern const int        tm_fn_learn_count;
+extern const TmFunction tm_fn_score[];
+extern const int        tm_fn_score_count;
 
 G_END_DECLS

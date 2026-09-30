@@ -23,6 +23,7 @@ typedef struct {
   gboolean  random;      /* the value is a draw, here or upstream */
   guint8    may_draw;    /* during a simulation: 0 unknown, 1 working it
                           * out, 2 could be random, 3 cannot be */
+  guint8    visit;       /* ordering the cells: 1 on the path, 2 placed */
 } Cell;
 
 /* One change, for undo: what a cell held (or its format) before. */
@@ -70,7 +71,38 @@ struct _TmSheet {
   /* For a random function met outside any cell's own stream, which a
    * well-formed sheet never does. */
   TmRng         fallback;
+
+  GHashTable   *sources;     /* lower-case name -> Source */
+
+  /* The formula cells in an order that works each out after every cell it
+   * names, so that none waits on a chain of others on the C stack; and
+   * which cells some formula names.  NULL until needed, and again after
+   * any cell changes. */
+  GArray       *order;       /* of guint64 key */
+  GHashTable   *named;       /* key + 1 -> TRUE */
+  /* Whether the last simulation kept every uncertain cell's futures. */
+  gboolean      kept_all;
 };
+
+/* A picture or a map loaded as data. */
+typedef struct {
+  char    *name;             /* as given */
+  char    *path;
+  TmImage *image;
+  TmMap   *map;
+} Source;
+
+static void
+source_free (gpointer p)
+{
+  Source *s = p;
+
+  g_free (s->name);
+  g_free (s->path);
+  tm_image_free (s->image);
+  tm_map_free (s->map);
+  g_free (s);
+}
 
 /* Formulas nest into cells nesting into formulas on the C stack; a chain
  * this deep is almost certainly a mistake, and a longer one would run the
@@ -80,6 +112,8 @@ struct _TmSheet {
 
 static const TmValue CIRCULAR = { TM_VALUE_ERROR, { .error = TM_ERR_CIRCULAR } };
 static const TmValue EMPTY = { TM_VALUE_EMPTY, { 0 } };
+
+static void forget_order (TmSheet *sheet);
 
 static void
 cell_free (gpointer p)
@@ -246,6 +280,54 @@ cell_stratified (gpointer data, double *u)
   return TRUE;
 }
 
+static Source *
+find_source (TmSheet *sheet, const char *name)
+{
+  char *key = g_ascii_strdown (name != NULL ? name : "", -1);
+  Source *s = g_hash_table_lookup (sheet->sources, key);
+
+  g_free (key);
+  return s;
+}
+
+static const TmImage *
+cell_image (gpointer data, const char *name)
+{
+  Source *s = find_source (data, name);
+  return s != NULL ? s->image : NULL;
+}
+
+static const TmMap *
+cell_map (gpointer data, const char *name)
+{
+  Source *s = find_source (data, name);
+  return s != NULL ? s->map : NULL;
+}
+
+static void
+cell_shared_stream (gpointer data, guint64 key, TmRng *rng)
+{
+  TmSheet *sheet = data;
+  guint64 h = sheet->stream_seed ^ (key * 0x9e3779b97f4a7c15ULL);
+
+  h = (h ^ (h >> 31)) * 0xbf58476d1ce4e5b9ULL;
+  h ^= (sheet->stream_index + 1) * 0xd6e8feb86659fd93ULL;
+  h = (h ^ (h >> 29)) * 0x94d049bb133111ebULL;
+  tm_rng_seed (rng, h ^ (h >> 32));
+}
+
+static guint
+cell_generation (gpointer data)
+{
+  return ((TmSheet *) data)->gen;
+}
+
+static const char *
+cell_sample_label (gpointer data, double sample)
+{
+  return tm_sim_sample_label (((TmSheet *) data)->sim, sample);
+}
+
 static const double *
 cell_samples (gpointer data, int row, int col, gboolean sorted, int *n)
 {
@@ -274,7 +356,13 @@ tm_sheet_new (void)
   sheet->stream_seed = sheet->draw_seed;
   sheet->ctx.cell = cell_value;
   sheet->ctx.samples = cell_samples;
+  sheet->ctx.sample_label = cell_sample_label;
   sheet->ctx.stratified = cell_stratified;
+  sheet->ctx.image = cell_image;
+  sheet->ctx.map = cell_map;
+  sheet->ctx.shared_stream = cell_shared_stream;
+  sheet->ctx.generation = cell_generation;
+  sheet->sources = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, source_free);
   sheet->ctx.data = sheet;
   tm_rng_seed (&sheet->fallback, 1);
   sheet->ctx.rng = &sheet->fallback;
@@ -286,11 +374,13 @@ tm_sheet_free (TmSheet *sheet)
 {
   if (sheet == NULL)
     return;
+  forget_order (sheet);
   g_hash_table_destroy (sheet->cells);
   g_hash_table_destroy (sheet->formats);
   g_hash_table_destroy (sheet->widths);
   g_ptr_array_free (sheet->undo, TRUE);
   g_ptr_array_free (sheet->redo, TRUE);
+  g_hash_table_destroy (sheet->sources);
   if (sheet->group != NULL)
     group_free (sheet->group);
   tm_sim_free (sheet->sim);
@@ -300,11 +390,13 @@ tm_sheet_free (TmSheet *sheet)
 void
 tm_sheet_clear (TmSheet *sheet)
 {
+  forget_order (sheet);
   g_hash_table_remove_all (sheet->cells);
   g_hash_table_remove_all (sheet->formats);
   g_hash_table_remove_all (sheet->widths);
   g_ptr_array_set_size (sheet->undo, 0);
   g_ptr_array_set_size (sheet->redo, 0);
+  g_hash_table_remove_all (sheet->sources);
   g_clear_pointer (&sheet->sim, tm_sim_free);
   sheet->iterations = 10000;
   sheet->seed = 1;
@@ -422,6 +514,182 @@ tm_sheet_forget_undo (TmSheet *sheet)
 }
 gboolean tm_sheet_can_redo (TmSheet *sheet) { return sheet->redo->len > 0; }
 
+/* ---- The order cells are worked out in ------------------------------- */
+
+static void
+forget_order (TmSheet *sheet)
+{
+  if (sheet->order != NULL)
+    g_array_free (sheet->order, TRUE);
+  sheet->order = NULL;
+  g_clear_pointer (&sheet->named, g_hash_table_destroy);
+}
+
+typedef struct {
+  TmSheet    *sheet;
+  GArray     *out;       /* keys of the formula cells a formula names */
+  GHashTable *ranges;    /* TmRange -> GArray of the cells in it */
+} Precedents;
+
+static void
+range_free (gpointer p)
+{
+  g_array_free (p, TRUE);
+}
+
+static guint
+range_hash (gconstpointer a)
+{
+  const TmRange *r = a;
+  return (guint) (r->row0 * 31 + r->col0) * 1000003u ^ (guint) (r->row1 * 31 + r->col1);
+}
+
+static gboolean
+range_equal (gconstpointer a, gconstpointer b)
+{
+  return memcmp (a, b, sizeof (TmRange)) == 0;
+}
+
+static void
+add_precedents (const TmRange *range, gpointer data)
+{
+  Precedents *p = data;
+  GArray *in;
+
+  if (range->row0 == range->row1 && range->col0 == range->col1)
+    {
+      Cell *c = lookup (p->sheet, range->row0, range->col0);
+      guint64 k = tm_key (range->row0, range->col0);
+
+      if (c != NULL)
+        {
+          g_hash_table_insert (p->sheet->named, GSIZE_TO_POINTER ((gsize) k + 1), GINT_TO_POINTER (TRUE));
+          if (c->formula != NULL)
+            g_array_append_val (p->out, k);
+        }
+      return;
+    }
+  /* The same range named by many cells is looked through once. */
+  in = g_hash_table_lookup (p->ranges, range);
+  if (in == NULL)
+    {
+      gint64 area = (gint64) tm_range_rows (range) * tm_range_cols (range);
+
+      in = g_array_new (FALSE, FALSE, sizeof (guint64));
+      if (area <= (gint64) g_hash_table_size (p->sheet->cells))
+        {
+          for (int r = range->row0; r <= range->row1; r++)
+            for (int col = range->col0; col <= range->col1; col++)
+              {
+                Cell *c = lookup (p->sheet, r, col);
+                if (c != NULL)
+                  {
+                    guint64 k = tm_key (r, col);
+                    g_array_append_val (in, k);
+                  }
+              }
+        }
+      else
+        {
+          GHashTableIter iter;
+          gpointer key;
+
+          g_hash_table_iter_init (&iter, p->sheet->cells);
+          while (g_hash_table_iter_next (&iter, &key, NULL))
+            {
+              guint64 k = *(guint64 *) key;
+              if (tm_range_contains (range, tm_key_row (k), tm_key_col (k)))
+                g_array_append_val (in, k);
+            }
+        }
+      g_hash_table_insert (p->ranges, g_memdup2 (range, sizeof *range), in);
+    }
+  for (guint i = 0; i < in->len; i++)
+    {
+      guint64 k = g_array_index (in, guint64, i);
+      g_hash_table_insert (p->sheet->named, GSIZE_TO_POINTER ((gsize) k + 1), GINT_TO_POINTER (TRUE));
+      if (lookup (p->sheet, tm_key_row (k), tm_key_col (k))->formula != NULL)
+        g_array_append_val (p->out, k);
+    }
+}
+
+typedef struct {
+  guint64 key;
+  Cell   *cell;
+  GArray *deps;
+  guint   next;
+} Frame;
+
+static guint64 *sorted_keys (GHashTable *table, guint *n);
+
+/* Depth first from each formula in turn, row by row, placing a cell once
+ * every cell it names is placed: a topological order of the formulas,
+ * found with a stack of our own rather than the C stack.  A cycle is
+ * cut where it is met; its cells come out #CIRC! when worked out. */
+static GArray *
+sheet_order (TmSheet *sheet)
+{
+  Precedents p;
+  GArray *stack;
+  guint n;
+  guint64 *keys;
+
+  if (sheet->order != NULL)
+    return sheet->order;
+  sheet->order = g_array_new (FALSE, FALSE, sizeof (guint64));
+  sheet->named = g_hash_table_new (g_direct_hash, g_direct_equal);
+  p.sheet = sheet;
+  p.ranges = g_hash_table_new_full (range_hash, range_equal, g_free, range_free);
+  stack = g_array_new (FALSE, FALSE, sizeof (Frame));
+  keys = sorted_keys (sheet->cells, &n);
+  for (guint i = 0; i < n; i++)
+    ((Cell *) g_hash_table_lookup (sheet->cells, &keys[i]))->visit = 0;
+
+  for (guint i = 0; i < n; i++)
+    {
+      Cell *c = g_hash_table_lookup (sheet->cells, &keys[i]);
+      Frame f;
+
+      if (c->formula == NULL || c->visit != 0)
+        continue;
+      p.out = g_array_new (FALSE, FALSE, sizeof (guint64));
+      tm_formula_foreach_range (c->formula, NULL, add_precedents, &p);
+      f = (Frame) { keys[i], c, p.out, 0 };
+      c->visit = 1;
+      g_array_append_val (stack, f);
+      while (stack->len > 0)
+        {
+          Frame *top = &g_array_index (stack, Frame, stack->len - 1);
+
+          if (top->next < top->deps->len)
+            {
+              guint64 k = g_array_index (top->deps, guint64, top->next++);
+              Cell *d = lookup (sheet, tm_key_row (k), tm_key_col (k));
+
+              if (d->visit == 0)
+                {
+                  d->visit = 1;
+                  p.out = g_array_new (FALSE, FALSE, sizeof (guint64));
+                  tm_formula_foreach_range (d->formula, NULL, add_precedents, &p);
+                  f = (Frame) { k, d, p.out, 0 };
+                  g_array_append_val (stack, f);
+                }
+            }
+          else
+            {
+              g_array_append_val (sheet->order, top->key);
+              top->cell->visit = 2;
+              g_array_free (top->deps, TRUE);
+              g_array_set_size (stack, stack->len - 1);
+            }
+        }
+    }
+  g_free (keys);
+  g_array_free (stack, TRUE);
+  g_hash_table_destroy (p.ranges);
+  return sheet->order;
+}
+
 /* ---- Cells ------------------------------------------------------------ */
 
 static void
@@ -431,6 +699,7 @@ set_input (TmSheet *sheet, int row, int col, const char *input)
   Cell *c;
 
   mark_changed (sheet);
+  forget_order (sheet);
   if (input == NULL || *input == '\0')
     {
       g_hash_table_remove (sheet->cells, &key);
@@ -455,15 +724,18 @@ set_input (TmSheet *sheet, int row, int col, const char *input)
   g_hash_table_replace (sheet->cells, new_key (row, col), c);
 }
 
-/* "12%" typed into a cell with no format of its own is shown as a
- * percentage, as Excel does. */
+/* "12%", "1,500" or "$9.99" typed into a cell with no format of its own
+ * is shown as it was typed, as Excel does. */
 static void
 format_from_input (TmSheet *sheet, int row, int col, const char *input)
 {
   TmValue v;
+  char *plain;
 
-  if (input == NULL || input[0] == '=' || strchr (input, '%') == NULL
-      || tm_sheet_get_format (sheet, row, col) != NULL)
+  if (input == NULL || input[0] == '=' || tm_sheet_get_format (sheet, row, col) != NULL)
+    return;
+  plain = tm_number_plain (input);
+  if (strchr (input, '%') == NULL && plain == NULL)
     return;
   v = tm_value_parse_input (input);
   if (v.type == TM_VALUE_NUMBER)
@@ -474,9 +746,32 @@ format_from_input (TmSheet *sheet, int row, int col, const char *input)
       if (dot != NULL)
         while (g_ascii_isdigit (dot[decimals + 1]))
           decimals++;
-      tm_sheet_set_format (sheet, row, col,
-                           decimals == 0 ? "0%" : decimals == 1 ? "0.0%" : "0.00%");
+      decimals = MIN (decimals, 4);
+      if (strchr (input, '%') != NULL)
+        tm_sheet_set_format (sheet, row, col,
+                             decimals == 0 ? "0%" : decimals == 1 ? "0.0%" : "0.00%");
+      else
+        {
+          /* The currency sign as typed, before the digits. */
+          const char *p = input;
+          GString *code = g_string_new (NULL);
+
+          while (g_ascii_isspace (*p) || *p == '-' || *p == '+')
+            p++;
+          while (*p != '\0' && !g_ascii_isdigit (*p) && *p != '-' && *p != '+' && *p != '.')
+            g_string_append_c (code, *p++);
+          g_string_append (code, "#,##0");
+          if (decimals > 0)
+            {
+              g_string_append_c (code, '.');
+              for (int i = 0; i < decimals; i++)
+                g_string_append_c (code, '0');
+            }
+          tm_sheet_set_format (sheet, row, col, code->str);
+          g_string_free (code, TRUE);
+        }
     }
+  g_free (plain);
   tm_value_clear (&v);
 }
 
@@ -579,16 +874,16 @@ sorted_keys (GHashTable *table, guint *n)
 static void
 evaluate_all (TmSheet *sheet)
 {
-  guint n;
-  guint64 *keys = sorted_keys (sheet->cells, &n);
+  GArray *order = sheet_order (sheet);
 
   sheet->gen++;
-  /* Row by row, which for a model laid out the usual way -- time running
-   * across, cause above effect -- keeps the chain of cells waiting on
-   * each other short. */
-  for (guint i = 0; i < n; i++)
-    cell_value (sheet, tm_key_row (keys[i]), tm_key_col (keys[i]));
-  g_free (keys);
+  /* Each after the cells it names, so that none has to work another out
+   * in the middle of its own formula. */
+  for (guint i = 0; i < order->len; i++)
+    {
+      guint64 k = g_array_index (order, guint64, i);
+      cell_value (sheet, tm_key_row (k), tm_key_col (k));
+    }
 }
 
 void
@@ -742,6 +1037,67 @@ tm_sheet_copy_range (TmSheet *sheet, const TmRange *src, int row, int col)
   g_free (formats);
 }
 
+void
+tm_sheet_move_range (TmSheet *sheet, const TmRange *src, int row, int col)
+{
+  int rows = tm_range_rows (src), cols = tm_range_cols (src);
+  int drow = row - src->row0, dcol = col - src->col0;
+  char **inputs, **formats;
+  guint n;
+  guint64 *keys;
+
+  if (drow == 0 && dcol == 0)
+    return;
+  inputs = g_new0 (char *, rows * cols);
+  formats = g_new0 (char *, rows * cols);
+  for (int r = 0; r < rows; r++)
+    for (int c = 0; c < cols; c++)
+      {
+        const char *in = tm_sheet_get_input (sheet, src->row0 + r, src->col0 + c);
+        char *moved = tm_formula_move (in, src, drow, dcol);
+
+        inputs[r * cols + c] = moved != NULL ? moved : g_strdup (in);
+        formats[r * cols + c] = g_strdup (tm_sheet_get_format (sheet, src->row0 + r, src->col0 + c));
+      }
+  tm_sheet_begin_undo (sheet);
+  /* Formulas elsewhere that name the moved cells follow them. */
+  keys = sorted_keys (sheet->cells, &n);
+  for (guint i = 0; i < n; i++)
+    {
+      int r = tm_key_row (keys[i]), c = tm_key_col (keys[i]);
+      Cell *cell = lookup (sheet, r, c);
+      char *moved;
+
+      if (cell == NULL || cell->formula == NULL || tm_range_contains (src, r, c))
+        continue;
+      if ((moved = tm_formula_move (cell->input, src, drow, dcol)) != NULL)
+        {
+          tm_sheet_set_input (sheet, r, c, moved);
+          g_free (moved);
+        }
+    }
+  g_free (keys);
+  for (int r = src->row0; r <= src->row1; r++)
+    for (int c = src->col0; c <= src->col1; c++)
+      {
+        if (lookup (sheet, r, c) != NULL)
+          tm_sheet_set_input (sheet, r, c, NULL);
+        if (tm_sheet_get_format (sheet, r, c) != NULL)
+          tm_sheet_set_format (sheet, r, c, NULL);
+      }
+  for (int r = 0; r < rows; r++)
+    for (int c = 0; c < cols; c++)
+      {
+        tm_sheet_set_format (sheet, row + r, col + c, formats[r * cols + c]);
+        tm_sheet_set_input (sheet, row + r, col + c, inputs[r * cols + c]);
+        g_free (inputs[r * cols + c]);
+        g_free (formats[r * cols + c]);
+      }
+  tm_sheet_end_undo (sheet);
+  g_free (inputs);
+  g_free (formats);
+}
+
 static void
 fill (TmSheet *sheet, const TmRange *range, gboolean down)
 {
@@ -835,6 +1191,94 @@ tm_sheet_set_seed (TmSheet *sheet, guint64 seed)
   sheet->seed = seed;
 }
 
+/* ---- Data sources ----------------------------------------------------- */
+
+static void
+add_source (TmSheet *sheet, const char *name, TmImage *image, TmMap *map, const char *path)
+{
+  Source *s = g_new0 (Source, 1);
+
+  s->name = g_strdup (name);
+  s->path = g_strdup (path);
+  s->image = image;
+  s->map = map;
+  g_hash_table_replace (sheet->sources, g_ascii_strdown (name, -1), s);
+  mark_changed (sheet);
+}
+
+void
+tm_sheet_add_image (TmSheet *sheet, const char *name, TmImage *image, const char *path)
+{
+  add_source (sheet, name, image, NULL, path);
+}
+
+void
+tm_sheet_add_map (TmSheet *sheet, const char *name, TmMap *map, const char *path)
+{
+  add_source (sheet, name, NULL, map, path);
+}
+
+TmImage *
+tm_sheet_get_image (TmSheet *sheet, const char *name)
+{
+  Source *s = find_source (sheet, name);
+  return s != NULL ? s->image : NULL;
+}
+
+TmMap *
+tm_sheet_get_map (TmSheet *sheet, const char *name)
+{
+  Source *s = find_source (sheet, name);
+  return s != NULL ? s->map : NULL;
+}
+
+const char *
+tm_sheet_source_path (TmSheet *sheet, const char *name)
+{
+  Source *s = find_source (sheet, name);
+  return s != NULL ? s->path : NULL;
+}
+
+gboolean
+tm_sheet_remove_source (TmSheet *sheet, const char *name)
+{
+  char *key = g_ascii_strdown (name, -1);
+  gboolean removed = g_hash_table_remove (sheet->sources, key);
+
+  g_free (key);
+  if (removed)
+    mark_changed (sheet);
+  return removed;
+}
+
+static int
+compare_names (const void *a, const void *b)
+{
+  return g_ascii_strcasecmp (*(char *const *) a, *(char *const *) b);
+}
+
+static char **
+source_names (TmSheet *sheet, gboolean images)
+{
+  GPtrArray *names = g_ptr_array_new ();
+  GHashTableIter iter;
+  gpointer value;
+
+  g_hash_table_iter_init (&iter, sheet->sources);
+  while (g_hash_table_iter_next (&iter, NULL, &value))
+    {
+      Source *s = value;
+      if ((images && s->image != NULL) || (!images && s->map != NULL))
+        g_ptr_array_add (names, g_strdup (s->name));
+    }
+  qsort (names->pdata, names->len, sizeof (char *), compare_names);
+  g_ptr_array_add (names, NULL);
+  return (char **) g_ptr_array_free (names, FALSE);
+}
+
+char **tm_sheet_image_names (TmSheet *sheet) { return source_names (sheet, TRUE); }
+char **tm_sheet_map_names (TmSheet *sheet) { return source_names (sheet, FALSE); }
+
 /* ---- Simulation ------------------------------------------------------- */
 
 static void
@@ -852,20 +1296,21 @@ add_range_cells (const TmRange *range, gpointer data)
 /* A sample is a number, or TRUE as 1 and FALSE as 0 -- so that the mean
  * of =B9<0 across the futures is the chance of a loss -- or NaN. */
 static double
-sample_of (const TmValue *v)
+sample_of (TmSim *sim, const TmValue *v)
 {
   if (v->type == TM_VALUE_NUMBER)
     return v->as.number;
   if (v->type == TM_VALUE_BOOL)
     return v->as.boolean ? 1 : 0;
+  if (v->type == TM_VALUE_TEXT && v->as.text[0] != '\0')
+    return tm_sim_label_sample (sim, v->as.text);
   return NAN;
 }
 
 /* Whether a cell could ever be random: it draws itself, or a cell it
  * names could be.  Worked out from the formulas, not from one run of
  * them, because a branch of an IF not taken in one future can be taken in
- * the next.  Depth first, remembering answers; a cycle counts as not
- * random (it is #CIRC! in any case). */
+ * the next.  Depth first, remembering answers; a cycle counts as random. */
 static gboolean may_draw (TmSheet *sheet, Cell *c);
 
 typedef struct {
@@ -913,7 +1358,12 @@ may_draw (TmSheet *sheet, Cell *c)
 
   if (c->may_draw >= 2)
     return c->may_draw == 2;
-  if (c->may_draw == 1 || c->formula == NULL)
+  /* A cell met again while still being looked into is on a cycle, which
+   * an IF may steer around in some futures: to be safe, it could be
+   * random. */
+  if (c->may_draw == 1)
+    return TRUE;
+  if (c->formula == NULL)
     return FALSE;
   c->may_draw = 1;
   if (c->draws)
@@ -929,6 +1379,12 @@ may_draw (TmSheet *sheet, Cell *c)
 #define SAMPLE_BUDGET (32 * 1000 * 1000)
 
 gboolean
+tm_sheet_kept_all (TmSheet *sheet)
+{
+  return sheet->sim == NULL || sheet->kept_all;
+}
+
+gboolean
 tm_sheet_simulate (TmSheet *sheet, TmSimProgress progress, gpointer data)
 {
   int iterations = sheet->iterations;
@@ -942,6 +1398,8 @@ tm_sheet_simulate (TmSheet *sheet, TmSimProgress progress, gpointer data)
   TmSim *sim = tm_sim_new (iterations, sheet->seed, latin);
   gboolean done = TRUE;
   guint n_random = 0;
+  GArray *order, *live;
+  gint64 room;
 
   /* The cells SIM.* functions ask about. */
   keys = sorted_keys (sheet->cells, &n_keys);
@@ -961,47 +1419,78 @@ tm_sheet_simulate (TmSheet *sheet, TmSimProgress progress, gpointer data)
     sheet->strata = g_hash_table_new_full (g_int64_hash, g_int64_equal, g_free, g_free);
   for (guint i = 0; i < n_keys; i++)
     ((Cell *) g_hash_table_lookup (sheet->cells, &keys[i]))->may_draw = 0;
-  for (guint i = 0; i < n_keys; i++)
-    may_draw (sheet, g_hash_table_lookup (sheet->cells, &keys[i]));
+  /* In dependency order, so that each finds its precedents answered. */
+  order = sheet_order (sheet);
+  for (guint i = 0; i < order->len; i++)
+    {
+      guint64 k = g_array_index (order, guint64, i);
+      may_draw (sheet, lookup (sheet, tm_key_row (k), tm_key_col (k)));
+    }
   evaluate_all (sheet);
   sheet->freezing = TRUE;
-  for (guint i = 0; i < n_keys; i++)
+  live = g_array_new (FALSE, FALSE, sizeof (guint64));
+  for (guint i = 0; i < order->len; i++)
     {
-      Cell *c = g_hash_table_lookup (sheet->cells, &keys[i]);
-      if (c->formula != NULL && c->random)
+      guint64 k = g_array_index (order, guint64, i);
+      Cell *c = lookup (sheet, tm_key_row (k), tm_key_col (k));
+
+      if (c->may_draw == 2)
+        g_array_append_val (live, k);
+      if (c->random)
         n_random++;
     }
-  for (guint i = 0; i < n_keys; i++)
-    {
-      Cell *c = g_hash_table_lookup (sheet->cells, &keys[i]);
-      gboolean asked = g_hash_table_contains (wanted, GSIZE_TO_POINTER ((gsize) keys[i] + 1));
 
-      if (c->formula == NULL)
-        continue;
-      if (asked || (c->random && (gint64) n_random * iterations <= SAMPLE_BUDGET))
-        {
-          TmRef ref = { tm_key_row (keys[i]), tm_key_col (keys[i]) };
-          g_array_append_val (targets, ref);
-        }
-    }
+  /* Every uncertain cell's futures if the budget allows; if not, the ones
+   * SIM.* asks about and then the model's outputs -- the uncertain cells
+   * no formula names -- while there is room. */
+  room = SAMPLE_BUDGET / MAX (iterations, 1);
+  sheet->kept_all = (gint64) n_random <= room;
+  for (int pass = 0; pass < 2; pass++)
+    for (guint i = 0; i < n_keys; i++)
+      {
+        Cell *c = g_hash_table_lookup (sheet->cells, &keys[i]);
+        gboolean asked = g_hash_table_contains (wanted, GSIZE_TO_POINTER ((gsize) keys[i] + 1));
+        gboolean keep;
+
+        if (c->formula == NULL)
+          continue;
+        if (pass == 0)
+          keep = asked;
+        else
+          keep = !asked && c->random
+                 && (sheet->kept_all
+                     || (room > 0 && !g_hash_table_contains (sheet->named,
+                                                             GSIZE_TO_POINTER ((gsize) keys[i] + 1))));
+        if (keep)
+          {
+            TmRef ref = { tm_key_row (keys[i]), tm_key_col (keys[i]) };
+            g_array_append_val (targets, ref);
+            room--;
+          }
+      }
 
   tracks = g_new (double *, MAX (targets->len, 1));
   for (guint t = 0; t < targets->len; t++)
     {
       TmRef *ref = &g_array_index (targets, TmRef, t);
       tracks[t] = tm_sim_track (sim, ref->row, ref->col);
-      tracks[t][0] = sample_of (tm_sheet_get_value (sheet, ref->row, ref->col));
+      tracks[t][0] = sample_of (sim, tm_sheet_get_value (sheet, ref->row, ref->col));
     }
 
   for (int it = 1; it < iterations; it++)
     {
       sheet->gen++;
       sheet->stream_index = (guint64) it;
+      for (guint i = 0; i < live->len; i++)
+        {
+          guint64 k = g_array_index (live, guint64, i);
+          cell_value (sheet, tm_key_row (k), tm_key_col (k));
+        }
       for (guint t = 0; t < targets->len; t++)
         {
           TmRef *ref = &g_array_index (targets, TmRef, t);
           const TmValue *v = cell_value (sheet, ref->row, ref->col);
-          tracks[t][it] = v != NULL ? sample_of (v) : NAN;
+          tracks[t][it] = v != NULL ? sample_of (sim, v) : NAN;
         }
       if (progress != NULL && (it % 250 == 0) && !progress (it, iterations, data))
         {
@@ -1012,6 +1501,7 @@ tm_sheet_simulate (TmSheet *sheet, TmSimProgress progress, gpointer data)
 
   g_free (tracks);
   g_free (keys);
+  g_array_free (live, TRUE);
   g_array_free (targets, TRUE);
   g_hash_table_destroy (wanted);
   g_clear_pointer (&sheet->strata, g_hash_table_destroy);

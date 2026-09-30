@@ -119,17 +119,19 @@ cell	G16	history as a line, the forecast as a fan.
 cell	A17	14
 cell	B17	1319
 cell	E17	=B17
-cell	G17	Each month is drawn on its own, so the
+cell	G17	A future's months share their surprises, as the
 cell	A18	15
 cell	B18	1375
 cell	E18	=B18
-cell	G18	annual spread is if anything too narrow.
+cell	G18	smoothing carries each forward: a high month
 cell	A19	16
 cell	B19	1410
 cell	E19	=B19
+cell	G19	is followed by more, and a year's total is as
 cell	A20	17
 cell	B20	1317
 cell	E20	=B20
+cell	G20	uncertain as the model says it is.
 cell	A21	18
 cell	B21	1275
 cell	E21	=B21

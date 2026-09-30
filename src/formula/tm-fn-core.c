@@ -9,6 +9,7 @@
  */
 
 #include "tm-fn-private.h"
+#include "tm-numfmt.h"
 
 #include <string.h>
 
@@ -213,6 +214,13 @@ round_to (double x, int digits, int mode)
   char buf[32];
   double y;
 
+  /* Already whole at that many places: fifteen digits and more past the
+   * number's own leave nothing to round. */
+  if (x == 0 || !isfinite (x * f) || (digits > 0 && fabs (x) * f >= 1e15))
+    return x;
+  if (f == 0)
+    return 0;
+
   /* Through fifteen significant digits first, so that 2.675 rounds as it
    * reads rather than as the double nearest it (2.67499999...) would. */
   g_snprintf (buf, sizeof buf, "%.15g", x * f);
@@ -234,7 +242,9 @@ round_fn (TmEvalContext *ctx, TmArg *args, int n, int mode)
 
   ARG_NUM (0, x);
   OPT_NUM (1, digits, 0);
-  return tm_value_number (round_to (x, (int) trunc (digits), mode));
+  /* Past about 330 places either way there is nothing left to round. */
+  digits = CLAMP (trunc (digits), -400, 400);
+  return tm_value_number (round_to (x, (int) digits, mode));
 }
 
 static TmValue fn_round     (TmEvalContext *c, TmArg *a, int n) { return round_fn (c, a, n, 0); }
@@ -308,9 +318,9 @@ lazy_choose (TmEvalContext *ctx, TmNode **args, int n)
       return tm_value_error (code);
     }
   tm_value_clear (&v);
-  k = (int) floor (d);
-  if (k < 1 || k >= n)
+  if (!(d >= 1 && d < n))
     return tm_value_error (TM_ERR_VALUE);
+  k = (int) floor (d);
   return tm_eval (ctx, args[k]);
 }
 
@@ -466,52 +476,17 @@ fn_text (TmEvalContext *ctx, TmArg *args, int n)
 {
   TmValue err;
   double x;
-  char *fmt = NULL, *out;
-  const char *dot;
-  int decimals = 0;
-  gboolean percent, thousands;
+  char *fmt;
 
   ARG_NUM (0, x);
   fmt = tm_arg_text (ctx, &args[1], &err);
   if (fmt == NULL)
     return err;
-  percent = strchr (fmt, '%') != NULL;
-  thousands = strchr (fmt, ',') != NULL;
-  dot = strchr (fmt, '.');
-  if (dot != NULL)
-    for (const char *p = dot + 1; *p == '0' || *p == '#'; p++)
-      decimals++;
-  if (percent)
-    x *= 100;
-  out = g_strdup_printf ("%.*f", decimals, x);
-  if (thousands)
-    {
-      GString *s = g_string_new (NULL);
-      const char *start = out + (out[0] == '-');
-      const char *point = strchr (start, '.');
-      int int_len = point != NULL ? (int) (point - start) : (int) strlen (start);
-
-      if (out[0] == '-')
-        g_string_append_c (s, '-');
-      for (int i = 0; i < int_len; i++)
-        {
-          if (i > 0 && (int_len - i) % 3 == 0)
-            g_string_append_c (s, ',');
-          g_string_append_c (s, start[i]);
-        }
-      if (point != NULL)
-        g_string_append (s, point);
-      g_free (out);
-      out = g_string_free (s, FALSE);
-    }
-  if (percent)
-    {
-      char *t = g_strconcat (out, "%", NULL);
-      g_free (out);
-      out = t;
-    }
+  /* The same formatting a cell's number format gets, so that TEXT(2.5,
+   * "0") and a cell formatted "0" both show 3, as Excel's do. */
+  err = tm_value_take (tm_format_number (x, fmt));
   g_free (fmt);
-  return tm_value_take (out);
+  return err;
 }
 
 /* ---- Looking things up ------------------------------------------------ */
@@ -534,10 +509,10 @@ fn_index (TmEvalContext *ctx, TmArg *args, int n)
       c = r;
       r = 1;
     }
+  if (!(r >= 1 && c >= 1 && r <= tm_range_rows (range) && c <= tm_range_cols (range)))
+    return tm_value_error (TM_ERR_REF);
   row = range->row0 + (int) r - 1;
   col = range->col0 + (int) c - 1;
-  if (r < 1 || c < 1 || !tm_range_contains (range, row, col))
-    return tm_value_error (TM_ERR_REF);
   return tm_value_copy (tm_ctx_cell (ctx, row, col));
 }
 
@@ -616,12 +591,12 @@ static TmValue
 fn_irr (TmEvalContext *ctx, TmArg *args, int n)
 {
   TmValue err;
-  GArray *flows = collect (ctx, args, 1, &err);
+  GArray *flows;
   double r, guess;
 
-  if (flows == NULL)
-    return err;
   OPT_NUM (1, guess, 0.1);
+  if ((flows = collect (ctx, args, 1, &err)) == NULL)
+    return err;
   r = guess;
   /* Newton's method on the net present value, with the flows a period
    * apart and the first one now. */

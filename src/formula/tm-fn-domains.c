@@ -272,11 +272,12 @@ fn_markov_estimate (TmEvalContext *ctx, TmArg *args, int n)
   int count;
   const TmValue **seq;
   double prior, hits = 0, total = 0;
-  GPtrArray *distinct = g_ptr_array_new ();
+  GPtrArray *distinct;
 
   OPT_NUM (3, prior, 0);
   if (prior < 0)
     return tm_value_error (TM_ERR_NUM);
+  distinct = g_ptr_array_new ();
   from = tm_arg_scalar (ctx, &args[0]);
   to = tm_arg_scalar (ctx, &args[1]);
   seq = tm_arg_cells (ctx, &args[2], &count);
@@ -485,19 +486,19 @@ fn_forecast_snaive (TmEvalContext *ctx, TmArg *args, int n)
   TmValue err;
   double h, m;
   GArray *y;
-  int T, k, i;
+  int T, i;
 
   ARG_NUM (0, h);
   ARG_NUM (2, m);
   h = floor (h);
   m = floor (m);
-  if (h < 1 || m < 1)
+  if (h < 1 || m < 1 || m > 1e8)
     return tm_value_error (TM_ERR_NUM);
   if ((y = series (ctx, &args[1], (guint) m, &err)) == NULL)
     return err;
   T = (int) y->len;
-  k = (int) ((h - 1) / m);
-  i = T + (int) h - (int) m * (k + 1) - 1;
+  /* The same point in the last season seen: h - 1 steps on, modulo m. */
+  i = T - (int) m + (int) fmod (h - 1, m);
   err = tm_value_number (g_array_index (y, double, i));
   g_array_free (y, TRUE);
   return err;
@@ -553,12 +554,8 @@ fn_forecast_damped (TmEvalContext *ctx, TmArg *args, int n)
         }
   g_array_free (y, TRUE);
   /* l + (phi + phi^2 + ... + phi^h) b */
-  f = phi_best;
-  for (int i = 0; i < (int) floor (h); i++)
-    {
-      damp += f;
-      f *= phi_best;
-    }
+  f = floor (h);
+  damp = phi_best >= 1 ? f : phi_best * (1 - pow (phi_best, f)) / (1 - phi_best);
   return tm_value_number (level + damp * trend);
 }
 
@@ -651,6 +648,8 @@ fn_poisson_score (TmEvalContext *ctx, TmArg *args, int n)
   OPT_NUM (4, rho, 0);
   if (lambda < 0 || mu < 0 || hg < 0 || ag < 0)
     return tm_value_error (TM_ERR_NUM);
+  if (hg > 1e6 || ag > 1e6)
+    return tm_value_number (0);
   return tm_value_number (poisson_pmf ((int) hg, lambda) * poisson_pmf ((int) ag, mu)
                           * dixon_coles ((int) hg, (int) ag, lambda, mu, rho));
 }

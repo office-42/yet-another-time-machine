@@ -5,6 +5,7 @@
  */
 
 #include "tm-file.h"
+#include "tm-sources.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -26,6 +27,7 @@ escape (const char *text)
       {
       case '\t': g_string_append (out, "\\t"); break;
       case '\n': g_string_append (out, "\\n"); break;
+      case '\r': g_string_append (out, "\\r"); break;
       case '\\': g_string_append (out, "\\\\"); break;
       default:   g_string_append_c (out, *p); break;
       }
@@ -46,6 +48,7 @@ unescape (const char *text)
             {
             case 't': g_string_append_c (out, '\t'); break;
             case 'n': g_string_append_c (out, '\n'); break;
+            case 'r': g_string_append_c (out, '\r'); break;
             default:  g_string_append_c (out, *p); break;
             }
           continue;
@@ -56,6 +59,21 @@ unescape (const char *text)
 }
 
 /* ---- .tm -------------------------------------------------------------- */
+
+/* A source's path as the file has it, resolved against the file's own
+ * folder, so that a model and its pictures can move together. */
+static char *
+resolve (const char *tm_path, const char *path)
+{
+  char *dir, *full;
+
+  if (g_path_is_absolute (path))
+    return g_strdup (path);
+  dir = g_path_get_dirname (tm_path);
+  full = g_build_filename (dir, path, NULL);
+  g_free (dir);
+  return full;
+}
 
 static gboolean
 load_tm (TmSheet *sheet, const char *contents, const char *path, GError **error)
@@ -78,7 +96,9 @@ load_tm (TmSheet *sheet, const char *contents, const char *path, GError **error)
       char **f;
       int nf;
 
-      g_strchomp (line);         /* also drops a \r from Windows */
+      /* A \r from Windows goes; spaces stay, for a cell that ends in one. */
+      if (*line != '\0' && line[strlen (line) - 1] == '\r')
+        line[strlen (line) - 1] = '\0';
       if (*line == '\0' || *line == '#')
         continue;
       f = g_strsplit (line, "\t", 3);
@@ -94,6 +114,41 @@ load_tm (TmSheet *sheet, const char *contents, const char *path, GError **error)
               tm_sheet_set_input (sheet, ref.row, ref.col, input);
               g_free (input);
             }
+        }
+      else if ((strcmp (f[0], "image") == 0 || strcmp (f[0], "map") == 0) && nf == 3)
+        {
+          /* image NAME PATH [west south east north] */
+          char **rest = g_strsplit (f[2], "\t", -1);
+          char *name = unescape (f[1]);
+          char *where = unescape (rest[0]);
+          char *full = resolve (path, where);
+          GError *e = NULL;
+          char *used = tm_sheet_load_source (sheet, full, name, &e);
+
+          if (used == NULL)
+            {
+              /* A missing picture is reported, not fatal: the rest of the
+               * model still loads, and its formulas say #NAME?. */
+              g_warning ("%s", e->message);
+              g_error_free (e);
+            }
+          else if (g_strv_length (rest) >= 5)
+            {
+              TmImage *image = tm_sheet_get_image (sheet, used);
+              if (image != NULL)
+                {
+                  image->has_bounds = TRUE;
+                  image->west = g_ascii_strtod (rest[1], NULL);
+                  image->south = g_ascii_strtod (rest[2], NULL);
+                  image->east = g_ascii_strtod (rest[3], NULL);
+                  image->north = g_ascii_strtod (rest[4], NULL);
+                }
+            }
+          g_free (used);
+          g_free (full);
+          g_free (where);
+          g_free (name);
+          g_strfreev (rest);
         }
       else if (strcmp (f[0], "format") == 0 && nf == 3)
         {
@@ -150,8 +205,69 @@ save_format (int row, int col, const char *format, gpointer data)
   g_free (text);
 }
 
+/* A source's path relative to the file's folder when it is inside it. */
 static char *
-save_tm (TmSheet *sheet)
+relative (const char *tm_path, const char *path)
+{
+  char *dir = g_path_get_dirname (tm_path);
+  char *abs_dir = g_canonicalize_filename (dir, NULL);
+  char *abs_path = g_canonicalize_filename (path, NULL);
+  char *out;
+  gsize n = strlen (abs_dir);
+
+  if (g_str_has_prefix (abs_path, abs_dir) && abs_path[n] == G_DIR_SEPARATOR)
+    out = g_strdup (abs_path + n + 1);
+  else
+    out = g_strdup (abs_path);
+  g_free (dir);
+  g_free (abs_dir);
+  g_free (abs_path);
+  return out;
+}
+
+static void
+save_sources (TmSheet *sheet, GString *out, const char *tm_path)
+{
+  char **images = tm_sheet_image_names (sheet);
+  char **maps = tm_sheet_map_names (sheet);
+
+  for (int i = 0; images[i] != NULL; i++)
+    {
+      TmImage *image = tm_sheet_get_image (sheet, images[i]);
+      char *rel = relative (tm_path, tm_sheet_source_path (sheet, images[i]));
+      char *name = escape (images[i]), *where = escape (rel);
+
+      g_string_append_printf (out, "image\t%s\t%s", name, where);
+      if (image->has_bounds)
+        {
+          char b[4][G_ASCII_DTOSTR_BUF_SIZE];
+          g_string_append_printf (out, "\t%s\t%s\t%s\t%s",
+                                  g_ascii_dtostr (b[0], sizeof b[0], image->west),
+                                  g_ascii_dtostr (b[1], sizeof b[1], image->south),
+                                  g_ascii_dtostr (b[2], sizeof b[2], image->east),
+                                  g_ascii_dtostr (b[3], sizeof b[3], image->north));
+        }
+      g_string_append_c (out, '\n');
+      g_free (rel);
+      g_free (name);
+      g_free (where);
+    }
+  for (int i = 0; maps[i] != NULL; i++)
+    {
+      char *rel = relative (tm_path, tm_sheet_source_path (sheet, maps[i]));
+      char *name = escape (maps[i]), *where = escape (rel);
+
+      g_string_append_printf (out, "map\t%s\t%s\n", name, where);
+      g_free (rel);
+      g_free (name);
+      g_free (where);
+    }
+  g_strfreev (images);
+  g_strfreev (maps);
+}
+
+static char *
+save_tm (TmSheet *sheet, const char *tm_path)
 {
   GString *out = g_string_new ("timemachine 1\n");
 
@@ -166,6 +282,7 @@ save_tm (TmSheet *sheet)
         tm_col_name (c, name, sizeof name);
         g_string_append_printf (out, "width\t%s\t%d\n", name, tm_sheet_col_width (sheet, c));
       }
+  save_sources (sheet, out, tm_path);
   tm_sheet_foreach_format (sheet, save_format, out);
   tm_sheet_foreach (sheet, save_cell, out);
   return g_string_free (out, FALSE);
@@ -270,8 +387,8 @@ csv_field (GString *out, const char *text)
   g_string_append_c (out, '"');
 }
 
-/* Values, as the grid shows them; a CSV file has no place for formulas
- * that the next program would not take for text. */
+/* Values: text as the grid shows it, numbers in full; a CSV file has no
+ * place for formulas that the next program would not take for text. */
 static char *
 save_csv (TmSheet *sheet)
 {
@@ -284,7 +401,11 @@ save_csv (TmSheet *sheet)
     {
       for (int c = 0; c <= used.col1; c++)
         {
-          char *text = tm_sheet_get_display (sheet, r, c);
+          /* Numbers as numbers, not as their format shows them: "1,235"
+           * or "12%" in a CSV file is text to the next program. */
+          const TmValue *v = tm_sheet_get_value (sheet, r, c);
+          char *text = v->type == TM_VALUE_NUMBER ? g_strdup_printf ("%.17g", v->as.number)
+                                                  : tm_sheet_get_display (sheet, r, c);
 
           if (c > 0)
             g_string_append_c (out, ',');
@@ -335,7 +456,7 @@ tm_file_load (TmSheet *sheet, const char *path, GError **error)
 gboolean
 tm_file_save (TmSheet *sheet, const char *path, GError **error)
 {
-  char *text = is_csv (path) ? save_csv (sheet) : save_tm (sheet);
+  char *text = is_csv (path) ? save_csv (sheet) : save_tm (sheet, path);
   gboolean ok = g_file_set_contents (path, text, -1, error);
 
   g_free (text);

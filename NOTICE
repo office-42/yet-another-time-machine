@@ -1,0 +1,12 @@
+Time Machine
+Copyright (C) 2026 The timemachine authors
+Licensed under the GNU General Public License, version 3 or later (see LICENSE).
+
+samples/maps/world.geojson
+  Country outlines from Natural Earth (1:110m Admin 0 - Countries),
+  https://www.naturalearthdata.com/. Natural Earth is in the public
+  domain; no permission is needed to use it. The properties kept are
+  name, iso_a3, continent, region_un, subregion, pop_est and gdp_md.
+
+samples/pictures/*.png
+  Made by build-aux/make-samples.py; synthetic, part of this program.

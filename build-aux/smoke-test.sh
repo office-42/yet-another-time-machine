@@ -512,6 +512,343 @@ Z2
 near Z1 190000 30000
 near Z2 0.28 0.05
 
+# ---- Learning from a table --------------------------------------------------
+
+# y = 2 + 3a - 2b exactly: regression must find the plane itself.
+table='A1 = 1
+A2 = 2
+A3 = 3
+A4 = 4
+A5 = 5
+A6 = 6
+B1 = 3
+B2 = 1
+B3 = 4
+B4 = 1
+B5 = 5
+B6 = 9
+C1 = =2+3*A1-2*B1
+C2 = =2+3*A2-2*B2
+C3 = =2+3*A3-2*B3
+C4 = =2+3*A4-2*B4
+C5 = =2+3*A5-2*B5
+C6 = =2+3*A6-2*B6
+D1 = 0
+D2 = 0
+D3 = 1
+D4 = 0
+D5 = 1
+D6 = 1
+E1 = 10
+E2 = 2
+'
+run 'learning from a table' "${table}F1 = =MLR.COEF(C1:C6,A1:B6,0)
+F2 = =MLR.COEF(C1:C6,A1:B6,1)
+F3 = =MLR.COEF(C1:C6,A1:B6,2)
+F4 = =FORECAST.MLR(E1:E2,C1:C6,A1:B6)
+F5 = =FORECAST.MLR(3.5,A1:A6,B1:B6)-FORECAST.LINEAR(3.5,A1:A6,B1:B6)
+F6 = =FORECAST.MLR.CONFINT(3.5,A1:A6,B1:B6)-FORECAST.LINEAR.CONFINT(3.5,A1:A6,B1:B6)
+F7 = =KNN.FORECAST(2.1,A1:A6,A1:A6,1)
+F8 = =KNN.PERCENTILE(3.4,A1:A6,A1:A6,1,3)
+F9 = =CONFORMAL.CONFINT(A1:A6,0.8)
+F10 = =CONFORMAL.CONFINT(A1:A6,0.9)
+F11 = =QUANTILE.REG(E1:E2,C1:C6,A1:B6,0.5)
+F12 = =LOGIT.PROB(9,D1:D6,A1:A6)
+F13 = =POISSON.REG(3.5,A1:A6,B1:B6)>0
+F1
+F2
+F3
+F4
+F5
+F6
+F7
+F8
+F9
+F10
+F11
+F12
+F13
+"
+near F1 2 1e-9
+near F2 3 1e-9
+near F3 -2 1e-9
+near F4 28 1e-9
+near F5 0 1e-9
+near F6 0 1e-9
+near F7 2 1e-12
+near F8 4 1e-12
+near F9 6 1e-12
+want "^F10${tab}#NUM!"
+near F11 28 0.001
+want "^F13${tab}TRUE"
+
+run 'scores and small formulas' 'A1 = 9
+A2 = 11
+A3 = 12
+A4 = 13
+A5 = 14
+A6 = 15
+A7 = 16
+A8 = 18
+A9 = 20
+A10 = 22
+B1 = =CRPS(A1:A10,15)
+B2 = =CRPS.NORMAL(15,15,4)
+B3 = =ERLANG.C(10,1,12)
+B4 = =KAPLAN.MEIER(14,A1:A10)
+B5 = =WEIBULL.DIST(10,2,10,TRUE)
+B6 = =PINBALL(A1:A5,A6:A10,0.9)
+B7 = =COVERAGE(A1:A5,A6:A10,A3:A7)
+C1 = 1
+C2 = 1
+C3 = 1
+C4 = 1
+C5 = 5
+C6 = 5
+C7 = 5
+C8 = 5
+B8 = =CHANGEPOINT(C1:C8)
+B9 = =SHRINK(20,5,A1:A10,C1:C10)
+B10 = =TEXT(2.5,"0")
+B11 = =POISSON.DIST(1000,1000,TRUE)
+B12 = =BINOM.DIST(5,10,0.5,TRUE)
+B1
+B2
+B3
+B4
+B5
+B6
+B7
+B8
+B9
+B10
+B11
+B12
+'
+near B1 1 1e-12
+near B2 0.9347799 1e-6
+near B3 0.4493882 1e-6
+near B4 0.5 1e-12
+near B5 0.6321206 1e-6
+near B6 5.76 1e-9
+near B7 1 1e-12
+near B8 5 0
+near B11 0.5084094 1e-6
+near B12 0.6230469 1e-6
+want "^B10${tab}3${tab}"
+
+run 'updating, copulas and decisions' 'A1 = =RAND.PROPORTION(7,10)
+A2 = =RAND()
+A3 = =RAND()
+B1 = 1
+B2 = 0.6
+C1 = 0.6
+C2 = 1
+D1 = =RAND.COPULA(B1:C2,1)
+D2 = =RAND.COPULA(B1:C2,2)
+D3 = =RAND.NORMAL(100,10)
+simulate 20000
+E1 = =SIM.MEAN(A1)
+E2 = =SIM.EVPI(A2,A3)
+E3 = =SIM.PBEST(1,A2,A3)
+E4 = =SIM.CE(D3,20)
+E5 = =SIM.CORREL(D1,D2)
+E6 = =SIM.PIT(D3,110)
+E7 = =SIM.CRPS(D3,100)
+E1
+E2
+E3
+E4
+E5
+E6
+E7
+'
+near E1 0.6667 0.005
+near E2 0.1667 0.006
+near E3 0.5 0.015
+near E4 97.5 0.3
+near E5 0.585 0.02
+near E6 0.841 0.01
+near E7 2.337 0.05
+
+# ---- Deep chains, text futures, correlated months -------------------------
+
+# A chain four thousand cells long, each naming the one below, used to be a
+# false #CIRC!: cells are now worked out in the order they depend on each
+# other, not by recursion.
+awk 'BEGIN { for (i = 1; i < 4000; i++) printf "A%d = =A%d+1\n", i, i + 1;
+             print "A4000 = 0"; print "A1" }' >chain.txt
+run 'a long chain' "$(cat chain.txt)
+"
+near A1 3999 0
+
+run 'text futures' 'D1 = dry
+D2 = wet
+E1 = 0.7
+F1 = 0.3
+E2 = 0.4
+F2 = 0.6
+A1 = dry
+A2 = =RAND.MARKOV(A1,D1:D2,E1:F2)
+A3 = =RAND.MARKOV(A2,D1:D2,E1:F2)
+A4 = =RAND.MARKOV(A3,D1:D2,E1:F2)
+A5 = =RAND.MARKOV(A4,D1:D2,E1:F2)
+A6 = =RAND.MARKOV(A5,D1:D2,E1:F2)
+A7 = =RAND.MARKOV(A6,D1:D2,E1:F2)
+A8 = =RAND.MARKOV(A7,D1:D2,E1:F2)
+A9 = =RAND.MARKOV(A8,D1:D2,E1:F2)
+A10 = =RAND.MARKOV(A9,D1:D2,E1:F2)
+simulate 20000
+B1 = =SIM.PROB(A10,"dry")
+B2 = =SIM.MODE(A10)
+B1
+B2
+stats A10
+'
+near B1 0.5714 0.012
+want "^B2${tab}dry"
+want "^A10${tab}wet${tab}"
+
+# The months of an exponential-smoothing forecast run high or low
+# together: a year's total is as uncertain as the model says.
+run 'correlated forecast months' 'simulate
+stats H7
+' "$samples/sales.tm"
+want "sd=[89][0-9][0-9]\."
+
+run 'moving cells, typed numbers' 'A1 = 5
+A2 = =A1*2
+C1 = =SUM(A1:A2)
+move A1:A2 B1
+B2
+C1
+D1 = 1,000
+D2 = $5
+D3 = =D1+D2
+D3
+'
+want "^B2${tab}10${tab}=B1\*2"
+want "^C1${tab}15${tab}=SUM(B1:B2)"
+near D3 1005 0
+
+# ---- Pictures, maps and places ------------------------------------------------
+
+run 'pictures' "image $samples/pictures/field-week1.png week1
+image $samples/pictures/radar-0.png r0 4 57 14 62
+image $samples/pictures/radar-1.png r1 4 57 14 62
+A1 = =IMAGE.WIDTH(\"week1\")
+A2 = =IMAGE.FRACTION(\"week1\",\"exg\",\">0.1\")
+A3 = =IMAGE.MOTION(\"r0\",\"r1\",\"dx\",0.1)*160
+A4 = =IMAGE.MOTION(\"r0\",\"r1\",\"dy\",0.1)*120
+A5 = =IMAGE.XY(\"r1\",59.5,9,\"u\")
+A6 = =IMAGE.GEO(\"r1\",59.5,9,\"gray\")>0
+A1
+A2
+A3
+A4
+A5
+A6
+"
+near A1 120 0
+near A2 0.04 0.01
+near A3 2 0.3
+near A4 -1 0.3
+near A5 0.5 1e-9
+want "^A6${tab}TRUE"
+
+run 'maps and places' "map $samples/maps/world.geojson world
+A1 = =MAP.REGION(\"world\",59.91,10.75)
+A2 = =MAP.AREA(\"world\",\"Norway\")
+A3 = =MAP.CONTAINS(\"world\",\"France\",48.86,2.35)
+A4 = =MAP.NEAREST(\"world\",0,-30)
+A5 = =GEO.DISTANCE(59.91,10.75,48.86,2.35)
+A6 = =GEO.DESTINATION(59.91,10.75,500,90,\"lat\")
+A7 = =MAP.PROPERTY(\"world\",\"Norway\",\"continent\")
+B1 = 60
+B2 = 61
+B3 = 60.5
+C1 = 10
+C2 = 11
+C3 = 10.2
+D1 = 5
+D2 = 9
+D3 = 7
+A8 = =GEO.KRIGE(61,11,B1:B3,C1:C3,D1:D3)
+A9 = =GEO.IDW(60,10,B1:B3,C1:C3,D1:D3)
+A1
+A2
+A3
+A4
+A5
+A6
+A7
+A8
+A9
+"
+want "^A1${tab}Norway"
+near A2 394620 8000
+want "^A3${tab}TRUE"
+want "^A4${tab}Brazil"
+near A5 1341 3
+near A6 59.8 0.2
+want "^A7${tab}Europe"
+near A8 9 1e-6
+near A9 5 1e-6
+
+# ---- The examples, end to end ----------------------------------------------------
+
+run 'examples, pictures and maps' 'Z1 = =H3
+simulate
+Z1
+' "$samples/nowcast.tm"
+near Z1 0.69 0.06
+
+run 'examples, wildfire' 'Z1 = =M5
+simulate 1000
+Z1
+' "$samples/wildfire.tm"
+near Z1 0.27 0.07
+
+run 'examples, crops and gauges' 'Z1 = =B13
+simulate
+Z1
+' "$samples/crops.tm"
+near Z1 0.51 0.05
+
+run 'examples, storm' 'Z1 = =B24
+simulate
+Z1
+B27
+' "$samples/storm.tm"
+near Z1 0.23 0.05
+want "^B27${tab}sea"
+
+run 'examples, learning' 'Z1 = =K24
+Z2 = =K6
+simulate
+Z1
+Z2
+' "$samples/analogues.tm"
+near Z1 0.29 0.05
+near Z2 1.25 0.02
+
+run 'examples, updating' 'Z1 = =B8
+Z2 = =E22
+simulate
+Z1
+Z2
+' "$samples/abtest.tm"
+near Z1 0.95 0.02
+near Z2 0.068 0.005
+
+run 'examples, lifetimes' 'Z1 = =F4
+Z2 = =F16
+Z1
+Z2
+' "$samples/lifetimes.tm"
+near Z1 2.05 0.02
+near Z2 0.24 0.01
+
 if [ "$failed" -ne 0 ]; then
   echo "smoke-test: FAILED" >&2
   exit 1

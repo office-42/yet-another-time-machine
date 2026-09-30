@@ -43,7 +43,13 @@ typedef struct {
   char *value;        /* the token's text, owned */
   double number;
   char *error;        /* first error, owned */
+  int depth;          /* brackets and signs within each other */
 } Parser;
+
+/* Excel's own limits, near enough: formulas nested deeper, or longer,
+ * than any person writes would only run the stack out. */
+#define MAX_NESTING 200
+#define MAX_LENGTH  8192
 
 static void
 fail (Parser *p, const char *message)
@@ -404,20 +410,26 @@ parse_postfix (Parser *p)
 static TmNode *
 parse_unary (Parser *p)
 {
+  TmNode *n;
+
+  if (++p->depth > MAX_NESTING)
+    {
+      fail (p, "the formula is nested too deeply");
+      p->depth--;
+      return NULL;
+    }
   if (is_op (p, "-") || is_op (p, "+"))
     {
-      TmNode *n = node_new (is_op (p, "-") ? TM_NODE_NEGATE : TM_NODE_PLUS);
-
+      n = node_new (is_op (p, "-") ? TM_NODE_NEGATE : TM_NODE_PLUS);
       next (p);
       n->as.arg = parse_unary (p);
       if (n->as.arg == NULL)
-        {
-          tm_node_free (n);
-          return NULL;
-        }
-      return n;
+        g_clear_pointer (&n, tm_node_free);
     }
-  return parse_postfix (p);
+  else
+    n = parse_postfix (p);
+  p->depth--;
+  return n;
 }
 
 /* One level of left-associative binary operators. */
@@ -497,6 +509,12 @@ tm_formula_parse (const char *text, char **error)
   Parser p = { 0 };
   TmNode *node;
 
+  if (strlen (text) > MAX_LENGTH)
+    {
+      if (error != NULL)
+        *error = g_strdup ("the formula is too long");
+      return NULL;
+    }
   p.text = text;
   p.pos = text;
   next (&p);
@@ -696,6 +714,72 @@ tm_formula_shift (const char *input, int drow, int dcol)
 }
 
 static void
+move_refs (TmNode *n, const TmRange *from, int drow, int dcol, gboolean *changed)
+{
+  switch (n->type)
+    {
+    case TM_NODE_REF:
+      if (tm_range_contains (from, n->as.ref.ref.row, n->as.ref.ref.col))
+        {
+          n->as.ref.ref.row += drow;
+          n->as.ref.ref.col += dcol;
+          *changed = TRUE;
+        }
+      break;
+    case TM_NODE_RANGE:
+      if (tm_range_contains (from, n->as.range.a.row, n->as.range.a.col)
+          && tm_range_contains (from, n->as.range.b.row, n->as.range.b.col))
+        {
+          n->as.range.a.row += drow;
+          n->as.range.a.col += dcol;
+          n->as.range.b.row += drow;
+          n->as.range.b.col += dcol;
+          *changed = TRUE;
+        }
+      break;
+    case TM_NODE_NEGATE:
+    case TM_NODE_PLUS:
+    case TM_NODE_PERCENT:
+    case TM_NODE_PAREN:
+      move_refs (n->as.arg, from, drow, dcol, changed);
+      break;
+    case TM_NODE_BINARY:
+      move_refs (n->as.binary.left, from, drow, dcol, changed);
+      move_refs (n->as.binary.right, from, drow, dcol, changed);
+      break;
+    case TM_NODE_CALL:
+      for (int i = 0; i < n->as.call.n_args; i++)
+        move_refs (n->as.call.args[i], from, drow, dcol, changed);
+      break;
+    default:
+      break;
+    }
+}
+
+char *
+tm_formula_move (const char *input, const TmRange *from, int drow, int dcol)
+{
+  TmNode *node;
+  gboolean changed = FALSE;
+  char *result = NULL;
+
+  if (input == NULL || input[0] != '=')
+    return NULL;
+  node = tm_formula_parse (input + 1, NULL);
+  if (node == NULL)
+    return NULL;
+  move_refs (node, from, drow, dcol, &changed);
+  if (changed)
+    {
+      char *body = tm_formula_print (node, 0, 0);
+      result = g_strconcat ("=", body, NULL);
+      g_free (body);
+    }
+  tm_node_free (node);
+  return result;
+}
+
+static void
 foreach_range (const TmNode *n, const char *prefix, gboolean take, TmRangeFunc func, gpointer data)
 {
   TmRange r;
@@ -736,8 +820,7 @@ foreach_range (const TmNode *n, const char *prefix, gboolean take, TmRangeFunc f
         {
           gboolean t = take;
 
-          if (prefix != NULL && i == 0
-              && g_str_has_prefix (n->as.call.name, prefix))
+          if (prefix != NULL && g_str_has_prefix (n->as.call.name, prefix))
             t = TRUE;
           foreach_range (n->as.call.args[i], prefix, t, func, data);
         }

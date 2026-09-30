@@ -55,6 +55,35 @@ draw_normal (TmEvalContext *ctx)
   return stratified (ctx, &u) ? tm_norm_inv (u) : tm_rng_normal (ctx->rng);
 }
 
+/* A generator that every cell drawing from the same fitted model shares
+ * within a future, so that their errors hang together: a forecast's
+ * months, which run high or low together, not each on its own.  key is
+ * the numbers that identify the model. */
+static inline void
+shared_rng (TmEvalContext *ctx, const double *key, int n, TmRng *rng)
+{
+  guint64 h = 1469598103934665603ULL;
+
+  for (int i = 0; i < n; i++)
+    {
+      union { double d; guint64 u; } bits = { key[i] };
+      h = (h ^ bits.u) * 1099511628211ULL;
+    }
+  if (ctx->shared_stream != NULL)
+    ctx->shared_stream (ctx->data, h, rng);
+  else
+    tm_rng_seed (rng, tm_rng_next (ctx->rng) ^ h);
+}
+
+/* The factor by which the true scatter might exceed the one estimated
+ * from df degrees of freedom: sqrt(df / chi-squared(df)).  A normal times
+ * it is Student's t. */
+static inline double
+draw_scale (TmRng *rng, double df)
+{
+  return sqrt (df / (2 * tm_rng_gamma (rng, df / 2)));
+}
+
 static inline TmValue
 num_or_error (double d)
 {

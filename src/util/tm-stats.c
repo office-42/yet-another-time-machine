@@ -18,6 +18,25 @@ tm_compare_doubles (const void *a, const void *b)
 }
 
 double
+tm_crps_sorted (const double *sorted, int m, double y, gboolean fair)
+{
+  double near = 0, spread = 0;
+
+  if (m <= 0)
+    return NAN;
+  /* The sum over pairs of |x_i - x_j| is, for sorted samples, the sum of
+   * (2i - m - 1) x_(i): linear time, not quadratic. */
+  for (int i = 0; i < m; i++)
+    {
+      near += fabs (sorted[i] - y);
+      spread += (2.0 * (i + 1) - m - 1) * sorted[i];
+    }
+  if (fair)
+    return m > 1 ? near / m - spread / ((double) m * (m - 1)) : near;
+  return near / m - spread / ((double) m * m);
+}
+
+double
 tm_percentile_sorted (const double *sorted, int n, double p)
 {
   double h, lo;

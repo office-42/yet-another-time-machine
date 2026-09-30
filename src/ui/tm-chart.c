@@ -5,6 +5,7 @@
  */
 
 #include "tm-chart.h"
+#include "tm-mapview.h"
 #include "tm-numfmt.h"
 
 #include <math.h>
@@ -134,8 +135,13 @@ draw_x_axis (cairo_t *cr, PangoLayout *layout, double lo, double hi,
   cairo_line_to (cr, x1, y + 0.5);
   cairo_stroke (cr);
   set_rgb (cr, FAINT, 1);
-  for (double t = ceil (lo / step) * step; t <= hi + step * 1e-9; t += step)
+  /* Counted in whole steps, not by adding a step each time: next to a
+   * value like 1e15 a small step is lost in the rounding, and t += step
+   * would never move. */
+  for (gint64 i = (gint64) ceil (lo / step - 1e-9), last = (gint64) floor (hi / step + 1e-9), k = 0;
+       i <= last && k < 100; i++, k++)
     {
+      double t = i * step;
       double x = x0 + (t - lo) / (hi - lo) * (x1 - x0);
       char *s = axis_label (t, step, percent);
 
@@ -228,6 +234,56 @@ draw_histogram (TmChart *self, cairo_t *cr, PangoLayout *layout, int width, int 
       cairo_fill (cr);
     }
 #undef XOF
+}
+
+/* A cell whose futures are text -- a state, a winner, a country: a bar
+ * for each outcome, commonest first, with its chance. */
+static gboolean
+draw_categories (cairo_t *cr, PangoLayout *layout, int width, int height,
+                 TmSim *sim, int row, int col)
+{
+  const char **labels;
+  int *counts, k = tm_sim_categories (sim, row, col, &labels, &counts);
+  int shown = MIN (k, 14), total = tm_sim_iterations (sim);
+  double x0 = 16, x1 = width - 16, y0 = MARGIN_T + 26, label_w = MIN (160.0, (x1 - x0) * 0.4);
+  double row_h;
+
+  if (k == 0)
+    {
+      g_free (labels);
+      g_free (counts);
+      return FALSE;
+    }
+  row_h = MIN (26.0, (height - y0 - 16) / MAX (shown, 1));
+  for (int i = 0; i < shown; i++)
+    {
+      double y = y0 + i * row_h, share = (double) counts[i] / total;
+      double bw = (x1 - x0 - label_w - 52) * counts[i] / counts[0];
+      char *pct = g_strdup_printf ("%.1f%%", 100 * share);
+
+      set_rgb (cr, INK, 1);
+      pango_layout_set_width (layout, (int) (label_w - 8) * PANGO_SCALE);
+      pango_layout_set_ellipsize (layout, PANGO_ELLIPSIZE_END);
+      text_at (cr, layout, labels[i], x0, y + row_h / 2, 0, 0.5);
+      pango_layout_set_width (layout, -1);
+      pango_layout_set_ellipsize (layout, PANGO_ELLIPSIZE_NONE);
+      set_rgb (cr, BAR, 0.85);
+      cairo_rectangle (cr, x0 + label_w, y + 3, MAX (1.0, bw), row_h - 6);
+      cairo_fill (cr);
+      set_rgb (cr, FAINT, 1);
+      text_at (cr, layout, pct, x0 + label_w + bw + 6, y + row_h / 2, 0, 0.5);
+      g_free (pct);
+    }
+  if (k > shown)
+    {
+      char *more = g_strdup_printf ("and %d more", k - shown);
+      set_rgb (cr, FAINT, 1);
+      text_at (cr, layout, more, x0, y0 + shown * row_h + 4, 0, 0);
+      g_free (more);
+    }
+  g_free (labels);
+  g_free (counts);
+  return TRUE;
 }
 
 /* Whether a cell reads as a heading: certain, and either typed in, text,
@@ -333,8 +389,10 @@ draw_fan (TmChart *self, cairo_t *cr, PangoLayout *layout, int width, int height
 
   /* The value axis. */
   cairo_set_line_width (cr, 1);
-  for (double t = lo; t <= hi + step * 1e-9; t += step)
+  for (gint64 i = (gint64) floor (lo / step + 1e-9), last = (gint64) ceil (hi / step - 1e-9), k = 0;
+       i <= last && k < 100; i++, k++)
     {
+      double t = i * step;
       double y = floor (YOF (t)) + 0.5;
       char *s = axis_label (t, step, percent);
 
@@ -498,14 +556,27 @@ draw (TmChart *self, cairo_t *cr, int width, int height)
 
   if (!self->has_range || self->sheet == NULL)
     ;
+  /* Places first: two cells, a row pair or a table headed lat and lon. */
+  else if ((r->row0 != r->row1 || r->col0 != r->col1)
+           && tm_draw_map (cr, layout, width, height, self->sheet, r))
+    ;
   else if (r->row0 == r->row1 && r->col0 == r->col1)
     {
       if (sim != NULL && tm_sim_has (sim, r->row0, r->col0))
-        draw_histogram (self, cr, layout, width, height, sim, r->row0, r->col0);
+        {
+          if (!draw_categories (cr, layout, width, height, sim, r->row0, r->col0))
+            draw_histogram (self, cr, layout, width, height, sim, r->row0, r->col0);
+        }
       else if (sim == NULL)
         draw_message (cr, layout, width, height,
                       "Press F5 to run the simulation, then pick an uncertain "
                       "cell (the tinted ones) to see its possible futures.");
+      else if (!tm_sheet_kept_all (self->sheet) && tm_sheet_is_random (self->sheet, r->row0, r->col0))
+        draw_message (cr, layout, width, height,
+                      "This cell is uncertain, but the model has too many uncertain cells to "
+                      "keep the futures of all of them; its outputs, and the cells SIM.* "
+                      "formulas name, were kept.  Name this one in a formula such as "
+                      "=SIM.MEAN(B9) and simulate again to see it.");
       else
         draw_message (cr, layout, width, height,
                       "This cell is certain: it has one future.  Pick a tinted cell, "
@@ -564,9 +635,7 @@ draw (TmChart *self, cairo_t *cr, int width, int height)
       g_free (pts);
     }
   else
-    draw_message (cr, layout, width, height,
-                  "Select one cell for its histogram, or one row or column of "
-                  "cells for a fan chart.");
+    tm_draw_heatmap (cr, layout, width, height, self->sheet, r);
 
   g_object_unref (layout);
 }
